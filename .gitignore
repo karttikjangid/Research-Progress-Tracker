@@ -11,3 +11,4 @@ public_log.md
 backups/
 logs/
 .agents/
+.claude/
