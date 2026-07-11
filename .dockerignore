@@ -1,0 +1,16 @@
+# Build context hygiene — keep the image small and secrets out.
+.git/
+.venv/
+**/__pycache__/
+**/*.pyc
+frontend/node_modules/
+frontend/dist/
+data/
+backups/
+logs/
+*.db
+.env
+public_log.md
+.agents/
+.claude/
+backend/.pytest_cache/

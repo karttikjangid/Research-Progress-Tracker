@@ -1,0 +1,30 @@
+# Render Blueprint for Sentinel — one Docker web service that runs the FastAPI
+# backend and serves the built frontend, with a persistent disk for SQLite +
+# audio + the whisper model cache.
+#
+# In the Render dashboard: New + → Blueprint → connect this repo. It creates the
+# service and disk from this file; then set the two secret env vars
+# (GATEKEEPER_PASSWORD, NVIDIA_API_KEY) under the service's Environment tab.
+services:
+  - type: web
+    name: sentinel
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: standard          # >= 2 GB RAM — the free/starter 512 MB tier will OOM on whisper
+    healthCheckPath: /healthz
+    autoDeploy: true
+    disk:
+      name: sentinel-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: GATEKEEPER_STATE   # DB, audio, backups, logs live on the disk
+        value: /data
+      - key: HF_HOME            # whisper model cached on the disk (survives restarts)
+        value: /data/hf
+      - key: EVAL_MODEL
+        value: meta/llama-3.1-70b-instruct
+      - key: GATEKEEPER_PASSWORD  # set in the dashboard — your single shared password
+        sync: false
+      - key: NVIDIA_API_KEY       # set in the dashboard — your NIM key
+        sync: false
