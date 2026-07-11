@@ -4,7 +4,9 @@ Enforcement lives in db.py (state machine, immutability, limits); routes
 pre-check only to give clear errors before spending an LLM call, and map
 GamingError → 409, GatedLimitExceeded → 400, LLMError → 503 (fail closed).
 """
+import base64
 import datetime as dt
+import hmac
 import json
 import os
 import random
@@ -15,9 +17,10 @@ from pathlib import Path
 import requests
 import yaml
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fsrs import Card, Rating, Scheduler
 from pydantic import BaseModel, field_validator
 from sqlalchemy import update
@@ -69,6 +72,32 @@ async def _lifespan(_app):
 
 
 app = FastAPI(title="Gatekeeper", lifespan=_lifespan)
+
+
+# Optional single-shared-password gate for private hosting. When
+# GATEKEEPER_PASSWORD is set, every request (app + API) requires HTTP Basic auth
+# with that password (any username). Unset (local dev) → no auth. The browser's
+# native credential prompt means no login UI is needed.
+@app.middleware("http")
+async def _require_password(request: Request, call_next):
+    pw = os.getenv("GATEKEEPER_PASSWORD")
+    if pw and request.url.path != "/healthz":
+        supplied, header = None, request.headers.get("authorization", "")
+        if header.startswith("Basic "):
+            try:
+                supplied = base64.b64decode(header[6:]).decode("utf-8").partition(":")[2]
+            except Exception:
+                supplied = None
+        if supplied is None or not hmac.compare_digest(supplied, pw):
+            return Response("Authentication required", status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="Sentinel"'})
+    return await call_next(request)
+
+
+@app.get("/healthz")
+def healthz():
+    """Unauthenticated liveness probe for the host's health check."""
+    return {"ok": True}
 
 
 def _daily_maintenance():
@@ -1140,3 +1169,11 @@ def history(s=Depends(db)):
                     "current_streak": log.current_streak if log else None,
                     "focus_minutes": focus_minutes})
     return out
+
+
+# Serve the built frontend (production). Mounted LAST so every /api route above
+# takes precedence; skipped in local dev where the Vite dev server serves the UI
+# and this directory doesn't exist.
+_STATIC = os.getenv("SENTINEL_STATIC", str(ROOT / "frontend" / "dist"))
+if Path(_STATIC).is_dir():
+    app.mount("/", StaticFiles(directory=_STATIC, html=True), name="frontend")
