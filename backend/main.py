@@ -1129,5 +1129,6 @@ def history(s=Depends(db)):
                     "tasks": [t.as_dict() for t in
                               s.query(Task).filter(Task.date == date).order_by(Task.id)],
                     "recordings": recs,
-                    "summary_line": log.summary_line if log else None})
+                    "summary_line": log.summary_line if log else None,
+                    "streak_day": bool(log.streak_day) if log else None})
     return out
