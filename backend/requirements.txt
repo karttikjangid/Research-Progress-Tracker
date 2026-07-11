@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-dotenv
+pyyaml
+requests
+python-multipart
+faster-whisper
+fsrs
