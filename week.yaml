@@ -1,0 +1,8 @@
+# Hand-edited weekly plan. The app displays this read-only; it never generates tasks.
+week_of: 2026-07-06
+themes:
+  - "Derive SVD from spectral theorem on A^T A; verify numerically incl. rank-deficient A"
+  - "Hand-derive gradient of ||XW - Y||_F^2; finite-difference check"
+  - "Probability space (Omega, F, P) for a 2-coin experiment; r.v. as measurable map"
+  - "Expectation as Lebesgue integral; construct an r.v. with undefined mean"
+  - "GSoC: PerceptionMetrics null-safe YOLO split handling"

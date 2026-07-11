@@ -1,0 +1,72 @@
+# Paper-Ready Math Curriculum — read by the daily loop.
+# Rule: an item is complete only when a graded artifact (grade >= B) exists in daily/.
+# Phase gates are exams-by-reconstruction: closed-book re-derivations, graded by math-grader.
+
+meta:
+  daily_theory_minutes: 90
+  daily_code_minutes: 45
+  daily_decode_minutes: 20
+  weekly_off_day: sunday
+
+phase_1:            # Jul 10 – Aug 31, 2026 (runs alongside GSoC; protect the 90-min block)
+  name: "Spine: matrix analysis + probability spaces"
+  blocks:
+    linear_algebra_and_matrix_calculus:
+      resources:
+        - "Trefethen & Bau, Numerical Linear Algebra — Lectures 1–5, 10–11, 24–25 (SVD as THE decomposition, conditioning, eigen/Schur)"
+        - "Parr & Howard, 'The Matrix Calculus You Need For Deep Learning' (arXiv:1802.01528) — full, with every identity re-derived by hand"
+        - "MIT 18.065 (Strang, Matrix Methods) — Lectures 1–8 as visual companion, 1.25x"
+        - "Matrix Cookbook — reference only, never primary"
+      items:
+        - "Derive SVD from spectral theorem on A^T A; verify numerically incl. rank-deficient A"
+        - "Hand-derive gradient of ||XW - Y||_F^2 + tr-based losses; finite-difference check"
+        - "Low-rank approximation: Eckart–Young statement + numerical attack with near-equal singular values"
+        - "Condition number: construct a matrix where naive solve loses 8 digits; explain via SVD"
+    probability_spaces:
+      resources:
+        - "Rosenthal, 'A First Look at Rigorous Probability Theory' — Ch 1–4 (sigma-algebras, measures, expectation as integral) THIS is the notation gap-closer"
+        - "Wasserman, All of Statistics — Ch 1–5 in parallel for speed and estimator vocabulary"
+      items:
+        - "Probability space (Ω, F, P): build one explicitly for a 2-coin experiment; define a r.v. as a measurable map"
+        - "Expectation as Lebesgue integral; construct an r.v. with undefined mean; Monte Carlo demo of non-convergence"
+        - "Conditional expectation as a random variable; tower property derivation + numerical check"
+        - "Modes of convergence (a.s., in probability, in distribution) with one separating counterexample each, simulated"
+  gate: "Closed-book: (1) derive OLS via projection AND via gradient; (2) state and prove tower property; (3) decode one screenshot equation from the JEPA paper (arXiv:2301.08243) cold."
+
+phase_2:            # Sep 1 – Oct 15, 2026
+  name: "The paper dialect: information theory, EM, concentration"
+  blocks:
+    information_theory:
+      resources:
+        - "Cover & Thomas — Ch 2 (entropy/KL/mutual information), Ch 8 (differential entropy)"
+        - "MacKay, ITILA — Ch 1–3, 28 (free, and the best intuition builder in print)"
+      items:
+        - "KL(p||q) vs KL(q||p): derive both for two Gaussians; visualize mode-seeking vs mass-covering"
+        - "Prove KL >= 0 via Jensen; identify where p << q is required; break it numerically"
+        - "Mutual information: derive I(X;Y) three equivalent ways; estimate it on correlated Gaussians"
+        - "ELBO derivation from scratch, twice: via Jensen and via KL-gap decomposition"
+    em_and_latent_variables:
+      resources:
+        - "Bishop PRML Ch 9 + Murphy PML-1 Ch 8 (EM) — derive, then implement"
+      items:
+        - "Full EM derivation for GMM; implement in NumPy; verify monotone log-likelihood; break it with a singular-covariance collapse and explain"
+    concentration_and_high_dim:
+      resources:
+        - "Vershynin, High-Dimensional Probability — Ch 1–3, 4.1–4.4 (THE dialect of modern theory-flavored ML papers)"
+      items:
+        - "Markov -> Chebyshev -> Chernoff -> Hoeffding as one tightening story; simulate all four bounds against reality"
+        - "Sub-Gaussian norms; why d-dim Gaussians live on a shell of radius sqrt(d); simulate"
+        - "Johnson–Lindenstrauss: statement, proof sketch, implementation on real embeddings"
+  gate: "Closed-book ELBO + EM derivations; decode the loss section of one world-models paper (e.g., Dreamer or IRIS) producing a full symbol table with zero unresolved symbols."
+
+phase_3:            # Oct 15 – Nov 30, 2026 — theory drops to maintenance (45 min/day)
+  name: "Niche-driven module + artifact"
+  note: >
+    Exactly ONE module chosen by where the target labs live, opened only after labs.csv
+    has 10 scored rows. Options: (a) optimization on manifolds — Boumal, Ch 1–4, if targeting
+    geometric/robotic-control labs; (b) SDEs/diffusion math — Särkkä & Solin Ch 1–4, if
+    targeting generative/world-model labs; (c) statistical learning bounds — Shalev-Shwartz
+    & Ben-David Ch 2–6, if targeting theory-adjacent labs.
+  artifact: >
+    One 2–3 week reproduction-plus-one-experiment of a recent paper from a top-3 target lab,
+    with a <=800-word writeup. This is the object every email in wave 1 points at.
