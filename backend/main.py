@@ -1125,10 +1125,18 @@ def history(s=Depends(db)):
                 d["audit"] = "(audit file missing)"
             recs.append(d)
         log = s.get(DayLog, date)
+        try:  # per-day focus minutes from completed, non-aborted work sessions
+            _sess = s.query(WorkSession).filter(WorkSession.date == date).all()
+            focus_minutes = round(sum((w.actual_minutes or 0) for w in _sess
+                                      if not w.aborted and w.actual_minutes), 1)
+        except Exception:
+            focus_minutes = 0
         out.append({"date": date,
                     "tasks": [t.as_dict() for t in
                               s.query(Task).filter(Task.date == date).order_by(Task.id)],
                     "recordings": recs,
                     "summary_line": log.summary_line if log else None,
-                    "streak_day": bool(log.streak_day) if log else None})
+                    "streak_day": bool(log.streak_day) if log else None,
+                    "current_streak": log.current_streak if log else None,
+                    "focus_minutes": focus_minutes})
     return out
