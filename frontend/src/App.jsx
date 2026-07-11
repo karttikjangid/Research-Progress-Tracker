@@ -31,6 +31,9 @@ export default function App() {
   const theme = week?.themes?.[0] || ''
 
   return (
+    <>
+    <div className="s-margin-col left" aria-hidden="true"><span>Positive mind</span></div>
+    <div className="s-margin-col right" aria-hidden="true"><span>If you can dream it you can do it</span></div>
     <div className="s-app">
       <div className="fx jb ac">
         <div className="dk-osw fs14">SENTINEL — EVIDENCE FILE</div>
@@ -66,6 +69,7 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+    </>
   )
 }
 

@@ -210,6 +210,24 @@ body::after {
   opacity: .3; mix-blend-mode: screen;
 }
 
+/* margin flourishes — a script line running vertically down each gutter */
+.s-margin-col {
+  position: fixed; top: 0; height: 100vh; z-index: -1;
+  width: calc((100vw - min(1560px, 92vw)) / 2);
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; user-select: none;
+}
+.s-margin-col.left { left: 0; }
+.s-margin-col.right { right: 0; }
+.s-margin-col span {
+  font-family: 'Lobster Two', cursive; font-style: italic; font-weight: 700;
+  font-size: 32px; letter-spacing: .03em; white-space: nowrap;
+  color: rgba(216, 184, 120, .5); text-shadow: 0 2px 12px rgba(0, 0, 0, .45);
+}
+.s-margin-col.left span { transform: rotate(-90deg); }
+.s-margin-col.right span { transform: rotate(90deg); }
+@media (max-width: 1499px) { .s-margin-col { display: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .s-recdot { animation: none; }
   .dk-stamp.struck, .s-bigstamp.struck { animation: none; }
