@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+data/
+*.db
+public_log.md
+.whisper-models/
+backups/
+logs/
+.agents/
