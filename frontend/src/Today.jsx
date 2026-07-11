@@ -10,9 +10,12 @@ import GatedFlow from './components/GatedFlow'
 
 const REQ = 'Evidence required · examined on submission · verdict final'
 const SESSION_KEY = 'gk_session'
-// Rest positions of the three fanned cards; focus pulls a card toward centre.
-const FAN = [{ left: 0, top: 36, rot: -3, z: 1 }, { left: 316, top: 2, rot: 0, z: 3 }, { left: 632, top: 42, rot: 2.4, z: 2 }]
-const FOCUS_LEFT = 316, FOCUS_TOP = 8
+// Fanned-card geometry. Left positions are computed from the measured fan width
+// so the three cards spread to fill wide panels instead of clustering centre;
+// focus pulls a card toward the centre. CW = card width.
+const CW = 372, GAP = 72
+const TOPS = [36, 2, 42], ROTS = [-3, 0, 2.4], ZS = [1, 3, 2]
+const FOCUS_TOP = 8
 
 export default function Today({ closed = false, streak, theme, onStreakChange }) {
   const [data, setData] = useState(null)
@@ -27,6 +30,18 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
   const [now, setNow] = useState(() => Date.now())
   const [struck, setStruck] = useState(() => new Set())
   const prevVerdicts = useRef({})
+  const fanRef = useRef(null)
+  const [fanW, setFanW] = useState(1400)
+
+  // Measure the fan so cards spread across the panel's real width.
+  useEffect(() => {
+    const el = fanRef.current
+    if (!el) return
+    setFanW(el.clientWidth)
+    const ro = new ResizeObserver((es) => { for (const e of es) setFanW(e.contentRect.width) })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [data])
 
   const refresh = useCallback(() =>
     get('/api/tasks').then((d) => { setData(d); setError('') }).catch((e) => setError(e.message)), [])
@@ -88,6 +103,14 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
   const gated = data.tasks.filter((t) => t.type === 'gated').slice(0, 3)
   const simple = data.tasks.filter((t) => t.type === 'simple')
   const elapsed = session ? Math.max(0, Math.floor((now - Date.parse(session.started_at)) / 1000)) : 0
+
+  // Spread the cards across the measured width; fall back to a light overlap on
+  // narrow panels. focusLeft is the centre a card animates to when focused.
+  const blockW = CW * 3 + GAP * 2
+  const spread = fanW >= blockW
+  const startX = spread ? (fanW - blockW) / 2 : 0
+  const leftOf = (i) => Math.round(spread ? startX + i * (CW + GAP) : [0, (fanW - CW) / 2, fanW - CW][i])
+  const focusLeft = Math.round((fanW - CW) / 2)
 
   const statusMeta = {
     passed: { label: 'RESOLVED', verdict: 'PASS' },
@@ -178,12 +201,12 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
           </p>
         </div>
       ) : (
-        <div className="dk-fan" style={{ zIndex: focused != null ? 50 : 'auto' }}>
+        <div className="dk-fan" ref={fanRef} style={{ zIndex: focused != null ? 50 : 'auto' }}>
           {gated.map((t, i) => {
             const meta = statusMeta[t.status] || { label: t.status.toUpperCase(), verdict: null }
-            const base = FAN[i]
+            const base = { left: leftOf(i), top: TOPS[i], rot: ROTS[i], z: ZS[i] }
             const rest = { x: 0, y: 0, rotate: base.rot, scale: 1, opacity: 1, filter: 'blur(0px)', zIndex: base.z }
-            const foc = { x: FOCUS_LEFT - base.left, y: FOCUS_TOP - base.top, rotate: 0, scale: 1.12, opacity: 1, filter: 'blur(0px)', zIndex: 60 }
+            const foc = { x: focusLeft - base.left, y: FOCUS_TOP - base.top, rotate: 0, scale: 1.12, opacity: 1, filter: 'blur(0px)', zIndex: 60 }
             const dim = { x: 0, y: 0, rotate: base.rot, scale: 0.92, opacity: 0.28, filter: 'blur(3px)', zIndex: base.z }
             const target = focused === t.id ? foc : focused != null ? dim : rest
             return (

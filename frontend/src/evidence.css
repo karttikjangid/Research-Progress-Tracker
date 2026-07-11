@@ -42,7 +42,7 @@ a:hover { color: #6e1f2b; }
 button:focus-visible, input:focus-visible { outline: 2px solid #93261f; outline-offset: 2px; }
 
 .s-app {
-  width: 1100px;
+  width: min(1560px, 92vw);
   margin: 28px auto;
   background: #514a3a;
   background-image: radial-gradient(ellipse 80% 60% at 50% 0, rgba(255, 240, 200, .07), transparent);
@@ -198,17 +198,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid #93261f; outline-
    Two fixed layers sit behind all content so the dark field no longer reads flat. */
 body::before {
   content: ""; position: fixed; inset: 0; z-index: -2;
-  background: #2e2a20 url("/bg-glow.jpg") no-repeat center top;
-  background-size: min(1500px, 150%) auto;
-  opacity: .9;
+  background:
+    radial-gradient(85% 55% at 50% -8%, rgba(158, 126, 58, .22), transparent 62%),
+    radial-gradient(40% 62% at 0% 45%, rgba(128, 94, 46, .18), transparent 70%),
+    radial-gradient(40% 62% at 100% 55%, rgba(122, 60, 44, .15), transparent 70%),
+    linear-gradient(175deg, #3b351f 0%, #2c2718 55%, #201c0f 100%);
 }
 body::after {
   content: ""; position: fixed; inset: 0; z-index: -1;
-  background:
-    radial-gradient(60% 48% at 50% 2%, rgba(163, 132, 62, .22), transparent 72%),
-    radial-gradient(48% 55% at 5% 52%, rgba(120, 34, 47, .13), transparent 72%),
-    radial-gradient(48% 55% at 95% 60%, rgba(133, 106, 46, .13), transparent 72%),
-    radial-gradient(125% 105% at 50% 40%, transparent 58%, rgba(14, 11, 6, .5));
+  background: url("/bg-glow.jpg") no-repeat center 35% / cover;
+  opacity: .3; mix-blend-mode: screen;
 }
 
 @media (prefers-reduced-motion: reduce) {
