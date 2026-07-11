@@ -1,0 +1,187 @@
+/*
+ * Evidence File — visual system ported verbatim from the approved Claude Design
+ * export ("Sentinel App.dc.html", direction 1c). Colors, type, spacing, rotation
+ * values, and shadows are reproduced exactly; do not "improve" them here.
+ *
+ * The `dk-*` / `s-*` classes are the export's own class names. The short atomic
+ * utilities (fx, jb, ac, gapN, mtN, fsN, fwN, m0, tc) reproduce the Design
+ * Components runtime's atomics so the exported markup can be carried over as-is.
+ */
+
+/* ---- atomics (mirror the DC runtime) ------------------------------------ */
+.fx { display: flex; }
+.col { flex-direction: column; }
+.ac { align-items: center; }
+.jc { justify-content: center; }
+.jb { justify-content: space-between; }
+.tc { text-align: center; }
+.m0 { margin: 0; }
+.gap8 { gap: 8px; }
+.gap10 { gap: 10px; }
+.gap12 { gap: 12px; }
+.gap16 { gap: 16px; }
+.gap24 { gap: 24px; }
+.mt8 { margin-top: 8px; }
+.mt12 { margin-top: 12px; }
+.mt16 { margin-top: 16px; }
+.mt24 { margin-top: 24px; }
+.fs11 { font-size: 11px; }
+.fs12 { font-size: 12px; }
+.fs13 { font-size: 13px; }
+.fs14 { font-size: 14px; }
+.fs15 { font-size: 15px; }
+.fs16 { font-size: 16px; }
+.fw5 { font-weight: 500; }
+.fw6 { font-weight: 600; }
+.fw7 { font-weight: 700; }
+
+/* ---- shell -------------------------------------------------------------- */
+body { margin: 0; background: #2e2a20; font-family: 'Courier Prime', monospace; }
+a { color: #93261f; }
+a:hover { color: #6e1f2b; }
+button:focus-visible, input:focus-visible { outline: 2px solid #93261f; outline-offset: 2px; }
+
+.s-app {
+  width: 1100px;
+  margin: 28px auto;
+  background: #514a3a;
+  background-image: radial-gradient(ellipse 80% 60% at 50% 0, rgba(255, 240, 200, .07), transparent);
+  color: #e9dfc6;
+  padding: 36px 48px 40px;
+  box-sizing: border-box;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, .5);
+}
+.dk-osw { font-family: 'Oswald', sans-serif; letter-spacing: .24em; font-weight: 500; }
+.s-lab { font-size: 11px; letter-spacing: .18em; opacity: .65; }
+
+/* ---- tabs --------------------------------------------------------------- */
+.s-tabs { display: flex; border: 2px solid #e9dfc6; }
+.s-tab { font-family: 'Oswald', sans-serif; letter-spacing: .22em; font-size: 11.5px; padding: 9px 20px; background: none; border: none; color: #e9dfc6; cursor: pointer; }
+.s-tab:hover { background: rgba(233, 223, 198, .15); }
+.s-tab.on { background: #e9dfc6; color: #241f15; }
+
+/* ---- buttons ------------------------------------------------------------ */
+.s-btn { font-family: 'Oswald', sans-serif; letter-spacing: .22em; font-size: 11.5px; padding: 10px 18px; border: 2px solid #241f15; background: none; color: #241f15; cursor: pointer; }
+.s-btn:hover { background: rgba(36, 31, 21, .08); }
+.s-btn.dis { opacity: .35; cursor: not-allowed; pointer-events: none; }
+.s-btn-lt { border-color: #e9dfc6; color: #e9dfc6; }
+.s-btn-lt:hover { background: rgba(233, 223, 198, .12); }
+.s-fill { background: #93261f; border-color: #93261f; color: #efe3c6; }
+.s-fill:hover { background: #7c1f19; }
+
+/* ---- chip + theme strip ------------------------------------------------- */
+.dk-chip { background: #e6d9b8; color: #251f15; padding: 16px 24px 14px; transform: rotate(-1.6deg); box-shadow: 0 6px 16px rgba(0, 0, 0, .35); }
+.dk-strip { background: #e6d9b8; color: #251f15; padding: 13px 20px; transform: rotate(.8deg); box-shadow: 0 6px 16px rgba(0, 0, 0, .35); max-width: 420px; }
+
+/* ---- fanned exhibit cards ---------------------------------------------- */
+.dk-fan { position: relative; height: 432px; margin-top: 30px; }
+.dk-card { position: absolute; width: 372px; background: #dbc99f; color: #241f15; border: 1px solid rgba(0, 0, 0, .28); box-shadow: 0 14px 28px rgba(0, 0, 0, .4); box-sizing: border-box; padding-bottom: 22px; }
+.dk-c1 { left: 0; top: 36px; transform: rotate(-3deg); }
+.dk-c2 { left: 316px; top: 2px; z-index: 3; background: #e7d9b6; }
+.dk-c3 { left: 632px; top: 42px; transform: rotate(2.4deg); }
+.dk-tab { font-family: 'Oswald', sans-serif; letter-spacing: .26em; font-size: 11.5px; background: rgba(0, 0, 0, .15); padding: 9px 18px; display: flex; justify-content: space-between; }
+.dk-in { padding: 18px 22px 0; }
+.dk-t { font-size: 18.5px; font-weight: 700; line-height: 1.3; }
+.dk-req { font-size: 12.5px; color: rgba(36, 31, 21, .65); margin-top: 5px; line-height: 1.45; }
+.dk-time { font-size: 30px; font-weight: 700; line-height: 1; }
+.dk-dash { border-top: 1px dashed rgba(36, 31, 21, .5); margin: 15px 0 13px; }
+.dk-reason { font-size: 12.5px; line-height: 1.55; color: rgba(36, 31, 21, .85); }
+.dk-stamp { position: absolute; top: 104px; left: 50%; transform: translateX(-50%) rotate(-12deg); font-family: 'Oswald', sans-serif; font-size: 38px; letter-spacing: .34em; padding: 6px 14px 6px 24px; border: 4px solid; opacity: .8; mix-blend-mode: multiply; }
+.dk-p { color: #2f6b58; }
+.dk-f { color: #93261f; }
+.dk-sess { display: inline-block; border: 2px solid #241f15; padding: 6px 12px 5px; font-family: 'Oswald', sans-serif; font-size: 11px; letter-spacing: .26em; }
+
+/* ---- free ticks --------------------------------------------------------- */
+.dk-ticks { background: #e6d9b8; color: #241f15; margin-top: 24px; padding: 16px 24px; box-shadow: 0 8px 18px rgba(0, 0, 0, .32); transform: rotate(-.4deg); display: flex; gap: 8px 30px; align-items: center; flex-wrap: wrap; font-size: 13.5px; }
+.dk-off { color: rgba(36, 31, 21, .55); }
+.s-strike { text-decoration: line-through; }
+.s-tickbtn { display: flex; gap: 8px; align-items: baseline; background: none; border: none; font: inherit; color: inherit; cursor: pointer; padding: 0; }
+.s-tickbtn:hover { color: #6e1f2b; }
+
+.dk-foot { margin-top: 22px; font-size: 11.5px; letter-spacing: .14em; opacity: .55; }
+
+/* ---- documents (Record + History) -------------------------------------- */
+.s-doc { background: #e7d9b6; color: #241f15; box-shadow: 0 14px 28px rgba(0, 0, 0, .4); border: 1px solid rgba(0, 0, 0, .28); }
+.s-doc760 { width: 760px; }
+.s-scroll { height: 400px; overflow-y: auto; border: 1px solid rgba(36, 31, 21, .3); padding: 20px 22px; margin-top: 14px; background: rgba(255, 250, 235, .35); }
+.s-frow { display: flex; justify-content: space-between; border-bottom: 1px dashed rgba(36, 31, 21, .35); padding: 7px 0; font-size: 14px; }
+.s-quote { font-style: italic; font-size: 14px; line-height: 1.6; margin: 10px 0; }
+.s-pair { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; font-size: 13.5px; line-height: 1.5; border-bottom: 1px dashed rgba(36, 31, 21, .35); }
+.s-fix { border: 3px double #2f6b58; padding: 16px 18px; margin-top: 16px; }
+
+/* ---- history archive ---------------------------------------------------- */
+.s-hrow { display: grid; grid-template-columns: 130px 80px 1fr 110px 110px 24px; gap: 0 18px; padding: 12px 0 8px; font-size: 11px; letter-spacing: .18em; color: rgba(36, 31, 21, .6); }
+.s-drow { display: grid; grid-template-columns: 130px 80px 1fr 110px 110px 24px; gap: 0 18px; padding: 14px 0; border: none; border-top: 1px dashed rgba(36, 31, 21, .45); font: inherit; font-size: 14.5px; background: none; color: inherit; cursor: pointer; text-align: left; width: 100%; align-items: baseline; }
+.s-drow:hover { background: rgba(36, 31, 21, .05); }
+.s-det { padding: 4px 0 22px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+.s-mini { border: 1px solid rgba(36, 31, 21, .4); padding: 14px 16px; background: rgba(255, 250, 235, .4); }
+.s-vs { font-family: 'Oswald', sans-serif; letter-spacing: .2em; border: 2px solid; padding: 3px 9px; font-size: 10.5px; white-space: nowrap; }
+.s-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px; align-items: start; }
+.s-panel { background: #e6d9b8; color: #241f15; padding: 18px 22px 20px; box-shadow: 0 8px 18px rgba(0, 0, 0, .32); }
+.s-inp { background: transparent; border: none; border-bottom: 2px solid #241f15; font-family: 'Courier Prime', monospace; font-size: 14px; padding: 6px 2px; width: 100%; color: #241f15; box-sizing: border-box; }
+.s-inp:focus { outline: none; border-bottom-color: #93261f; }
+.s-gent { padding: 8px 0; border-bottom: 1px dashed rgba(36, 31, 21, .3); font-size: 13.5px; line-height: 1.5; }
+
+/* ---- close-of-day modal ------------------------------------------------- */
+.s-ovl { position: fixed; inset: 0; background: rgba(20, 17, 10, .65); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.s-modal { width: 560px; background: #e7d9b6; color: #241f15; box-shadow: 0 30px 60px rgba(0, 0, 0, .6); border: 1px solid rgba(0, 0, 0, .3); }
+.s-srow { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 10px 0; border-bottom: 1px dashed rgba(36, 31, 21, .35); font-size: 14px; }
+.s-bigstamp { display: inline-block; font-family: 'Oswald', sans-serif; font-size: 42px; letter-spacing: .3em; padding: 10px 16px 10px 28px; border: 5px solid #93261f; color: #93261f; transform: rotate(-8deg); opacity: .85; mix-blend-mode: multiply; }
+
+/* ---- recording indicator ------------------------------------------------ */
+@keyframes recblink { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.s-recdot { width: 10px; height: 10px; border-radius: 50%; background: #93261f; animation: recblink 1.2s infinite; }
+
+/* ---- verdict stamp strike (Phase 2) ------------------------------------- */
+/* When a real verdict resolves, the stamp strikes down into place rather than
+   appearing statically. The end-state matches the base .dk-stamp transform. */
+@keyframes stampstrike {
+  0%   { opacity: 0; transform: translateX(-50%) rotate(-12deg) scale(2.3); }
+  55%  { opacity: .95; }
+  100% { opacity: .8; transform: translateX(-50%) rotate(-12deg) scale(1); }
+}
+.dk-stamp.struck { animation: stampstrike .36s cubic-bezier(.2, .75, .25, 1) both; }
+
+@keyframes bigstampstrike {
+  0%   { opacity: 0; transform: rotate(-8deg) scale(2.1); }
+  55%  { opacity: .95; }
+  100% { opacity: .85; transform: rotate(-8deg) scale(1); }
+}
+.s-bigstamp.struck { animation: bigstampstrike .4s cubic-bezier(.2, .75, .25, 1) both; }
+
+/* ---- deliberate screen transition -------------------------------------- */
+@keyframes screenfade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.s-screen { animation: screenfade .22s ease-out both; }
+
+/* ---- small helpers for wired states ------------------------------------ */
+.s-err { background: #93261f; color: #efe3c6; padding: 8px 12px; font-size: 12.5px; line-height: 1.5; }
+.s-muted { opacity: .6; }
+.s-ta { background: rgba(255, 250, 235, .5); border: 1.5px solid #241f15; font-family: 'Courier Prime', monospace; font-size: 13px; line-height: 1.5; padding: 10px 12px; color: #241f15; width: 100%; box-sizing: border-box; resize: vertical; }
+.s-ta:focus { outline: none; border-color: #93261f; }
+
+/* small control inside light cards/documents */
+.s-mini-btn { font-family: 'Oswald', sans-serif; letter-spacing: .18em; font-size: 10.5px; border: 1.5px solid #241f15; background: none; color: #241f15; padding: 5px 10px; cursor: pointer; }
+.s-mini-btn:hover { background: rgba(36, 31, 21, .08); }
+.s-mini-btn:disabled { opacity: .35; cursor: not-allowed; }
+.s-mini-btn.dk-f { border-color: #93261f; color: #93261f; }
+
+/* ancillary record — the wired subsystems the export did not depict */
+.s-anc { border-top: 2px dashed rgba(233, 223, 198, .3); margin-top: 30px; padding-top: 22px; }
+.s-anc-h { font-family: 'Oswald', sans-serif; letter-spacing: .24em; font-size: 12px; font-weight: 500; opacity: .8; }
+.s-card { background: #e6d9b8; color: #241f15; padding: 16px 20px; box-shadow: 0 6px 16px rgba(0, 0, 0, .3); }
+.s-hint { font-size: 11px; color: rgba(36, 31, 21, .55); margin-top: 8px; }
+.s-sel { background: rgba(255, 250, 235, .5); border: 1.5px solid #241f15; font-family: 'Courier Prime', monospace; font-size: 13px; padding: 6px 8px; color: #241f15; }
+
+@media (prefers-reduced-motion: reduce) {
+  .s-recdot { animation: none; }
+  .dk-stamp.struck, .s-bigstamp.struck { animation: none; }
+  .s-screen { animation: none; }
+}
+
+/* ---- inputs/selects inside light documents ----------------------------- */
+.s-field { background: transparent; border: 1.5px solid #241f15; font-family: 'Courier Prime', monospace; font-size: 13.5px; padding: 6px 8px; color: #241f15; }
+.s-field:focus { outline: none; border-color: #93261f; }
+
+@media (prefers-reduced-motion: reduce) {
+  .s-recdot { animation: none; }
+}
