@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { get, post } from './api'
 import { headerDate } from './format'
 import Today from './Today'
@@ -47,17 +48,23 @@ export default function App() {
         </div>
       </div>
 
-      <div key={screen} className="s-screen">
-        <Active closed={closed} streak={streak} theme={theme} onStreakChange={loadStreak} />
-      </div>
+      <AnimatePresence mode="wait">
+        <motion.div key={screen}
+          initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: .2, ease: 'easeOut' }}>
+          <Active closed={closed} streak={streak} theme={theme} onStreakChange={loadStreak} />
+        </motion.div>
+      </AnimatePresence>
 
-      {modal && (
-        <CloseFileController
-          closed={closed}
-          onClosed={() => { setClosed(true); loadStreak() }}
-          onDismiss={() => setModal(false)}
-        />
-      )}
+      <AnimatePresence>
+        {modal && (
+          <CloseFileController key="closefile"
+            closed={closed}
+            onClosed={() => { setClosed(true); loadStreak() }}
+            onDismiss={() => setModal(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }

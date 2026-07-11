@@ -172,6 +172,45 @@ button:focus-visible, input:focus-visible { outline: 2px solid #93261f; outline-
 .s-hint { font-size: 11px; color: rgba(36, 31, 21, .55); margin-top: 8px; }
 .s-sel { background: rgba(255, 250, 235, .5); border: 1.5px solid #241f15; font-family: 'Courier Prime', monospace; font-size: 13px; padding: 6px 8px; color: #241f15; }
 
+/* focus mode — one exhibit pulled forward, the rest of the panel dimmed */
+.s-app { position: relative; }
+.s-focus-backdrop { position: absolute; inset: 0; background: rgba(18, 15, 9, .58); z-index: 40; cursor: pointer; }
+.dk-card.focused { box-shadow: 0 34px 70px rgba(0, 0, 0, .6); cursor: default; }
+.dk-actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+.dk-close { margin-left: auto; font-family: 'Oswald', sans-serif; letter-spacing: .18em; font-size: 11px; border: none; background: none; color: rgba(36, 31, 21, .6); cursor: pointer; padding: 4px 6px; }
+.dk-close:hover { color: #93261f; }
+
+/* press feedback everywhere (lively) */
+.s-btn:active, .s-mini-btn:active, .s-tab:active, .dk-close:active { transform: translateY(1px); }
+
+/* last-7-days marks */
+.s-marks { display: flex; gap: 9px; align-items: flex-end; }
+.s-mark { width: 18px; height: 26px; border: 1.5px solid rgba(233, 223, 198, .55); box-sizing: border-box; position: relative; }
+.s-mark .s-mark-d { position: absolute; left: 3px; right: 3px; bottom: 2px; text-align: center; font-size: 8.5px; letter-spacing: .04em; color: rgba(233, 223, 198, .5); }
+.s-mark.clean { background: #e6d9b8; border-color: #e6d9b8; }
+.s-mark.broken { background: none; border-color: #93261f; }
+.s-mark.broken::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to top right, transparent 44%, #93261f 46%, #93261f 54%, transparent 56%); }
+.s-mark.today { outline: 1.5px solid rgba(233, 223, 198, .5); outline-offset: 2px; }
+.s-marks-lab { font-size: 10px; letter-spacing: .2em; opacity: .55; margin-bottom: 8px; }
+
+/* ambient background — the (heavily blurred, de-worded) spotlight image as a
+   soft pool of light, plus a warm wash in the dead margins and an edge vignette.
+   Two fixed layers sit behind all content so the dark field no longer reads flat. */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -2;
+  background: #2e2a20 url("/bg-glow.jpg") no-repeat center top;
+  background-size: min(1500px, 150%) auto;
+  opacity: .9;
+}
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: -1;
+  background:
+    radial-gradient(60% 48% at 50% 2%, rgba(163, 132, 62, .22), transparent 72%),
+    radial-gradient(48% 55% at 5% 52%, rgba(120, 34, 47, .13), transparent 72%),
+    radial-gradient(48% 55% at 95% 60%, rgba(133, 106, 46, .13), transparent 72%),
+    radial-gradient(125% 105% at 50% 40%, transparent 58%, rgba(14, 11, 6, .5));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .s-recdot { animation: none; }
   .dk-stamp.struck, .s-bigstamp.struck { animation: none; }

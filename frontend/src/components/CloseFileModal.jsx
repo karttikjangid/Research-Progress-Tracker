@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion'
 import { headerDate } from '../format'
 
 // The close-of-day modal. Confirmation (verdict summary + consequence) then the
@@ -17,8 +18,11 @@ export default function CloseFileModal({
   consequence, closedNote, onKeepWorking, onConfirmClose, onDone,
 }) {
   return (
-    <div className="s-ovl">
-      <div className="s-modal">
+    <motion.div className="s-ovl"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18 }}>
+      <motion.div className="s-modal"
+        initial={{ scale: .9, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: .95, opacity: 0 }} transition={{ type: 'spring', stiffness: 320, damping: 26 }}>
         <div className="dk-tab"><span>CLOSE OF DAY</span><span>{headerDate()}</span></div>
         {!closed ? (
           <div style={{ padding: '20px 26px 26px' }}>
@@ -57,7 +61,7 @@ export default function CloseFileModal({
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }

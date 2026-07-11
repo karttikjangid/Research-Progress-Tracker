@@ -1,25 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { get, post } from './api'
-import { clock } from './format'
+import { clock, todayISO } from './format'
 import StreakChip from './components/StreakChip'
 import ThemeStrip from './components/ThemeStrip'
 import ExhibitCard from './components/ExhibitCard'
 import TicksStrip from './components/TicksStrip'
 import GatedFlow from './components/GatedFlow'
 
-const POS = ['dk-c1', 'dk-c2', 'dk-c3']
 const REQ = 'Evidence required · examined on submission · verdict final'
 const SESSION_KEY = 'gk_session'
+// Rest positions of the three fanned cards; focus pulls a card toward centre.
+const FAN = [{ left: 0, top: 36, rot: -3, z: 1 }, { left: 316, top: 2, rot: 0, z: 3 }, { left: 632, top: 42, rot: 2.4, z: 2 }]
+const FOCUS_LEFT = 316, FOCUS_TOP = 8
 
-// PHASE 2 — Today, wired to /api/tasks. Gated tasks fill the fanned exhibit
-// cards (verdict stamps + the one-retry-then-locked flow); simple tasks are the
-// free ticks. A single work session (the backend permits one open at a time) is
-// associated to an exhibit client-side so its live timer can show on that card —
-// the backend still measures duration and earns timer_honored server-side.
 export default function Today({ closed = false, streak, theme, onStreakChange }) {
   const [data, setData] = useState(null)
+  const [recent, setRecent] = useState([])
   const [error, setError] = useState('')
   const [gating, setGating] = useState(null)
+  const [focused, setFocused] = useState(null) // task id of the pulled-forward card
+  const [dealt, setDealt] = useState(false)     // fan has finished dealing in
   const [session, setSession] = useState(() => {
     try { return JSON.parse(localStorage.getItem(SESSION_KEY)) } catch { return null }
   })
@@ -30,8 +31,17 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
   const refresh = useCallback(() =>
     get('/api/tasks').then((d) => { setData(d); setError('') }).catch((e) => setError(e.message)), [])
   useEffect(() => { refresh() }, [refresh])
+  useEffect(() => { get('/api/history').then(setRecent).catch(() => setRecent([])) }, [])
 
-  // Tick the active session's cosmetic clock (duration is authoritative server-side).
+  // The deal-in stagger only applies to the first render; later animations snap.
+  useEffect(() => { const t = setTimeout(() => setDealt(true), 900); return () => clearTimeout(t) }, [])
+  // Escape closes focus mode.
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') setFocused(null) }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [])
+
   useEffect(() => {
     if (!session) return
     const t = setInterval(() => setNow(Date.now()), 1000)
@@ -70,7 +80,6 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
     post(`/api/sessions/${session.id}/end`).then(() => { storeSession(null); onStreakChange?.() })
       .catch((e) => { setError(e.message); storeSession(null) })
   }
-
   const completeTick = (id) =>
     post(`/api/tasks/${id}/complete`).then(refresh).catch((e) => setError(e.message))
 
@@ -86,29 +95,24 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
     failed_once: { label: 'OPEN — RETRY', verdict: 'FAIL' },
     open: { label: 'OPEN', verdict: null },
   }
-
   const reasonFor = (t) => {
     if (t.status === 'open') return 'No verdict until evidence is submitted. Closing the day files the exhibit as-is.'
-    if (t.status === 'failed_once') return `${t.reason} — one retry left; open to file a revised artifact.`
+    if (t.status === 'failed_once') return `${t.reason} — one retry left; file a revised artifact.`
     if (t.status === 'failed_final') return `${t.reason} — failed twice; locked until tomorrow.`
     return t.reason
   }
 
-  // The session-area node for one exhibit.
+  // Session-area node for one exhibit (live timer, begin/end).
   const sessionSlot = (t) => {
     const unresolved = t.status === 'open' || t.status === 'failed_once'
     const mine = session && session.task_id === t.id
     if (mine) {
       return (
         <div className="fx jb ac">
-          <div>
-            <div className="s-lab">SESSION RUNNING</div>
-            <div className="dk-time mt8">{clock(elapsed)}</div>
-          </div>
+          <div><div className="s-lab">SESSION RUNNING</div><div className="dk-time mt8">{clock(elapsed)}</div></div>
           <div className="fx col gap8" style={{ alignItems: 'flex-end' }}>
             <span className="dk-sess">IN SESSION</span>
-            <button className="s-mini-btn dk-f" type="button"
-              onClick={(e) => { e.stopPropagation(); endSession() }}>■ END</button>
+            <button className="s-mini-btn dk-f" type="button" onClick={(e) => { e.stopPropagation(); endSession() }}>■ END</button>
           </div>
         </div>
       )
@@ -116,21 +120,26 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
     if (unresolved) {
       return (
         <div className="fx jb ac">
-          <div>
-            <div className="s-lab">SESSION</div>
-            <div className="dk-time mt8 s-muted">—:—:—</div>
-          </div>
+          <div><div className="s-lab">SESSION</div><div className="dk-time mt8 s-muted">—:—:—</div></div>
           <button className="s-mini-btn" type="button" disabled={!!session}
             title={session ? 'Another session is running' : 'Begin a timed session'}
-            onClick={(e) => { e.stopPropagation(); beginSession(t.id) }}>▶ BEGIN</button>
+            onClick={(e) => { e.stopPropagation(); beginSession(t.id) }}>▶ START</button>
         </div>
       )
     }
-    // resolved — no per-task timer exists in the backend; show real attempt count.
+    return (<><div className="s-lab">ATTEMPTS</div><div className="dk-time mt8">{t.attempts} <span className="fs13 s-muted">of 2</span></div></>)
+  }
+
+  const footerFor = (t) => {
+    const unresolved = t.status === 'open' || t.status === 'failed_once'
     return (
       <>
-        <div className="s-lab">ATTEMPTS</div>
-        <div className="dk-time mt8">{t.attempts} <span className="fs13 s-muted">of 2</span></div>
+        {unresolved && (
+          <button className="s-mini-btn" type="button" onClick={(e) => { e.stopPropagation(); setGating(t) }}>
+            {t.status === 'failed_once' ? 'FILE REVISED EVIDENCE' : 'FILE EVIDENCE'}
+          </button>
+        )}
+        <button className="dk-close" type="button" onClick={(e) => { e.stopPropagation(); setFocused(null) }}>✕ CLOSE</button>
       </>
     )
   }
@@ -138,6 +147,13 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
   return (
     <>
       {error && <p className="s-err" style={{ marginTop: '24px' }}>{error}</p>}
+
+      <AnimatePresence>
+        {focused != null && (
+          <motion.div className="s-focus-backdrop" onClick={() => setFocused(null)}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .2 }} />
+        )}
+      </AnimatePresence>
 
       {closed && (
         <div className="s-panel fx ac gap16" style={{ marginTop: '24px', transform: 'rotate(-.4deg)' }}>
@@ -149,8 +165,8 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
       <div className="fx jb mt24" style={{ alignItems: 'flex-start' }}>
         <StreakChip
           day={closed ? 0 : (streak?.current_streak ?? '—')}
-          note={closed ? 'BROKEN — RESETS AT 00:00'
-            : streak ? `STREAK INTACT · LONGEST ${streak.longest_streak}` : 'STREAK'} />
+          note={closed ? 'BROKEN — RESETS AT 00:00' : streak ? `STREAK INTACT · LONGEST ${streak.longest_streak}` : 'STREAK'} />
+        <SevenDayMarks days={buildLast7(recent)} />
         <ThemeStrip theme={theme || '—'} />
       </div>
 
@@ -162,22 +178,34 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
           </p>
         </div>
       ) : (
-        <div className="dk-fan">
+        <div className="dk-fan" style={{ zIndex: focused != null ? 50 : 'auto' }}>
           {gated.map((t, i) => {
             const meta = statusMeta[t.status] || { label: t.status.toUpperCase(), verdict: null }
-            const unresolved = t.status === 'open' || t.status === 'failed_once'
+            const base = FAN[i]
+            const rest = { x: 0, y: 0, rotate: base.rot, scale: 1, opacity: 1, filter: 'blur(0px)', zIndex: base.z }
+            const foc = { x: FOCUS_LEFT - base.left, y: FOCUS_TOP - base.top, rotate: 0, scale: 1.12, opacity: 1, filter: 'blur(0px)', zIndex: 60 }
+            const dim = { x: 0, y: 0, rotate: base.rot, scale: 0.92, opacity: 0.28, filter: 'blur(3px)', zIndex: base.z }
+            const target = focused === t.id ? foc : focused != null ? dim : rest
             return (
               <ExhibitCard
                 key={t.id}
                 letter={String.fromCharCode(65 + i)}
-                posClass={POS[i]}
                 statusLabel={meta.label}
                 title={t.title}
                 req={REQ}
                 verdict={meta.verdict}
                 struck={struck.has(t.id)}
                 reason={reasonFor(t)}
-                onClick={unresolved ? () => setGating(t) : undefined}
+                focused={focused === t.id}
+                footer={footerFor(t)}
+                onClick={() => setFocused((f) => (f === t.id ? f : t.id))}
+                motionProps={{
+                  style: { left: base.left, top: base.top },
+                  initial: { opacity: 0, y: -50, rotate: 0, scale: 0.9 },
+                  animate: target,
+                  transition: { type: 'spring', stiffness: 280, damping: 28, delay: dealt ? 0 : 0.05 + i * 0.1 },
+                  whileHover: focused == null ? { y: -6, scale: 1.02, transition: { type: 'spring', stiffness: 400, damping: 20 } } : undefined,
+                }}
               >
                 {sessionSlot(t)}
               </ExhibitCard>
@@ -192,27 +220,55 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
 
       <Ancillary onChange={() => { refresh(); onStreakChange?.() }} />
 
-      {gating && (
-        <GatedFlow task={gating}
-          onDone={() => { setGating(null); refresh(); onStreakChange?.() }} />
-      )}
+      <AnimatePresence>
+        {gating && <GatedFlow key="gated" task={gating} onDone={() => { setGating(null); refresh(); onStreakChange?.() }} />}
+      </AnimatePresence>
     </>
   )
 }
 
-// Free ticks = self-certified simple tasks (backend: open → done, one-way). The
-// synthetic verbal-drill row (derived from today's recording) is appended as a
-// read-only tick pointing at the Record tab.
+// ---- last-7-days marks ----------------------------------------------------
+const DOW1 = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+
+function buildLast7(days) {
+  const map = Object.fromEntries((days || []).map((d) => [d.date, d]))
+  const base = new Date()
+  const out = []
+  for (let k = 6; k >= 0; k--) {
+    const dt = new Date(base); dt.setDate(base.getDate() - k)
+    const iso = dt.toISOString().slice(0, 10)
+    const d = map[iso]
+    let state = 'none'
+    if (d) state = d.streak_day ? 'clean' : d.summary_line ? 'broken' : 'open'
+    out.push({ iso, dow: DOW1[dt.getDay()], state, today: iso === todayISO() })
+  }
+  return out
+}
+
+function SevenDayMarks({ days }) {
+  return (
+    <div className="tc">
+      <div className="s-marks-lab">LAST 7 DAYS</div>
+      <div className="s-marks">
+        {days.map((d) => (
+          <div key={d.iso} className={`s-mark ${d.state}${d.today ? ' today' : ''}`} title={`${d.iso} — ${d.state}`}>
+            <span className="s-mark-d">{d.dow}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// Free ticks = simple tasks (one-way complete) + the synthetic verbal-drill row.
 function buildTicks(simple, verbal, complete) {
   const ticks = simple.map((t) => ({
-    label: t.title,
-    done: t.status === 'done',
+    label: t.title, done: t.status === 'done',
     onToggle: t.status === 'done' ? undefined : () => complete(t.id),
   }))
   ticks.push({
     label: verbal.done ? 'Verbal drill — audited' : verbal.recorded ? 'Verbal drill — audit unread (RECORD tab)' : 'Verbal drill — not recorded (RECORD tab)',
-    done: verbal.done,
-    onToggle: undefined,
+    done: verbal.done, onToggle: undefined,
   })
   return ticks
 }
@@ -235,8 +291,6 @@ function Ancillary({ onChange }) {
   )
 }
 
-// Create a task — the fan and the ticks are empty until something is filed, and
-// the export has no creation affordance, so this lives in the ancillary strip.
 function FileItem({ onChange }) {
   const [title, setTitle] = useState('')
   const [type, setType] = useState('gated')
@@ -244,16 +298,14 @@ function FileItem({ onChange }) {
   const add = (e) => {
     e.preventDefault()
     if (!title.trim()) return
-    post('/api/tasks', { title, type }).then(() => { setTitle(''); setErr(''); onChange?.() })
-      .catch((er) => setErr(er.message))
+    post('/api/tasks', { title, type }).then(() => { setTitle(''); setErr(''); onChange?.() }).catch((er) => setErr(er.message))
   }
   return (
     <form className="s-card" onSubmit={add}>
       <div className="s-lab">FILE A NEW ITEM</div>
       {err && <p className="s-err" style={{ margin: '8px 0' }}>{err}</p>}
       <div className="fx gap8" style={{ marginTop: '10px', alignItems: 'center' }}>
-        <input className="s-inp" style={{ flex: 1 }} value={title} placeholder="What must be done…"
-          onChange={(e) => setTitle(e.target.value)} />
+        <input className="s-inp" style={{ flex: 1 }} value={title} placeholder="What must be done…" onChange={(e) => setTitle(e.target.value)} />
         <select className="s-sel" value={type} onChange={(e) => setType(e.target.value)}>
           <option value="gated">gated exhibit</option>
           <option value="simple">free tick</option>
@@ -265,19 +317,15 @@ function FileItem({ onChange }) {
   )
 }
 
-// Spaced repetition: title-only prompt → reveal → self-grade. Order enforced
-// server-side; a 'forgot' spawns a RECALL gated task.
 function DueReviews({ onChange }) {
   const [due, setDue] = useState([])
   const [open, setOpen] = useState(null)
   const [err, setErr] = useState('')
-  const load = useCallback(() =>
-    get('/api/reviews/due').then(setDue).catch((e) => setErr(e.message)), [])
+  const load = useCallback(() => get('/api/reviews/due').then(setDue).catch((e) => setErr(e.message)), [])
   useEffect(() => { load() }, [load])
 
   const reveal = (id) => post(`/api/reviews/${id}/reveal`).then((r) => setOpen({ id, ...r })).catch((e) => setErr(e.message))
-  const grade = (id, g) => post(`/api/reviews/${id}/grade`, { grade: g })
-    .then(() => { setOpen(null); load(); onChange?.() }).catch((e) => setErr(e.message))
+  const grade = (id, g) => post(`/api/reviews/${id}/grade`, { grade: g }).then(() => { setOpen(null); load(); onChange?.() }).catch((e) => setErr(e.message))
 
   if (!due.length) return null
   return (
@@ -309,8 +357,6 @@ function DueReviews({ onChange }) {
   )
 }
 
-// End-of-day taste judgment: two arm attributions + one required line. Immutable
-// server-side once written.
 function TasteLog() {
   const [existing, setExisting] = useState(undefined)
   const [drift, setDrift] = useState('none')
@@ -321,8 +367,7 @@ function TasteLog() {
 
   const submit = (e) => {
     e.preventDefault()
-    post('/api/tastelog', { drift_arm: drift, dread_arm: dread, one_liner: line })
-      .then(setExisting).catch((er) => setErr(er.message))
+    post('/api/tastelog', { drift_arm: drift, dread_arm: dread, one_liner: line }).then(setExisting).catch((er) => setErr(er.message))
   }
   if (existing === undefined) return <div className="s-card"><div className="s-lab">TASTE LOG</div></div>
   return (

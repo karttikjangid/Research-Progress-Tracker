@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { motion } from 'framer-motion'
 import { post } from '../api'
 
 // The gated-evidence flow, in the Evidence File aesthetic: paste the artifact →
@@ -21,8 +22,11 @@ export default function GatedFlow({ task, onDone }) {
   }
 
   return (
-    <div className="s-ovl">
-      <div className="s-modal" style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+    <motion.div className="s-ovl"
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: .18 }}>
+      <motion.div className="s-modal" style={{ maxHeight: '90vh', overflowY: 'auto' }}
+        initial={{ scale: .9, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }}
+        exit={{ scale: .95, opacity: 0 }} transition={{ type: 'spring', stiffness: 320, damping: 26 }}>
         <div className="dk-tab"><span>FILE EVIDENCE — {task.title.toUpperCase()}</span><span>{`ATTEMPT ${(task.attempts || 0) + 1} OF 2`}</span></div>
         <div style={{ padding: '20px 26px 26px' }}>
           {err && <p className="s-err" style={{ marginBottom: '14px' }}>{err}</p>}
@@ -77,7 +81,7 @@ export default function GatedFlow({ task, onDone }) {
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }
