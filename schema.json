@@ -1,0 +1,31 @@
+{
+  "current_phase": "Phase 1: Math Spine & GSoC",
+  "daily_timer_durations": {
+    "math_strain_minutes": 20,
+    "gsoc_continuity_hours": 2,
+    "vocal_drill_minutes": 5
+  },
+  "tasks": [
+    {
+      "id": "string",
+      "category": "math_strain | gsoc | low_intensity",
+      "title": "string",
+      "status": "pending | active | locked | completed",
+      "hypothesis_stack": [],
+      "verification_artifact_path": "string",
+      "llm_gate_question": "string",
+      "user_response": "string"
+    }
+  ],
+  "vocal_logs": [
+    {
+      "date": "YYYY-MM-DD",
+      "audio_path": "string",
+      "transcript_audit": {
+        "filler_density": "string",
+        "imprecise_vocabulary": [],
+        "passed": false
+      }
+    }
+  ]
+}
