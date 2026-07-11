@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS vocab_flags (
+  id INTEGER NOT NULL PRIMARY KEY,
+  term_used VARCHAR NOT NULL,
+  term_meant VARCHAR NOT NULL,
+  date VARCHAR NOT NULL,
+  source VARCHAR NOT NULL
+)

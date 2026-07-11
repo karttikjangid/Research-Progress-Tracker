@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS tastelog (
+  date VARCHAR NOT NULL PRIMARY KEY,
+  drift_arm VARCHAR NOT NULL,
+  dread_arm VARCHAR NOT NULL,
+  one_liner TEXT NOT NULL
+)

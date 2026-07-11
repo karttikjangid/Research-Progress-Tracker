@@ -1,0 +1,12 @@
+-- H2: timezone cutover marker (no data backfill).
+--
+-- From this version on, all datetimes are stored tz-aware UTC and IST is
+-- applied only at day-boundary comparisons (see backend/clock.py). Historical
+-- date-only strings (reviews.due_date, day_log.date, *.date columns) cannot be
+-- safely re-derived: the original wall-clock instant behind a bare 'YYYY-MM-DD'
+-- is lost, and reinterpreting it risks a double shift. They are left as-is; any
+-- one-day skew is confined to rows written before this migration.
+--
+-- Intentionally a no-op DDL: this file exists to bump schema_version and record
+-- the cutover in the migration history. See decisions.md.
+SELECT 1;

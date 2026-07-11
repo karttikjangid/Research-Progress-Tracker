@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS syntheses (
+  week_start VARCHAR NOT NULL PRIMARY KEY,
+  content TEXT NOT NULL,
+  created_at VARCHAR NOT NULL
+)
