@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { get, post, postForm } from './api'
 import { mmss, todayISO } from './format'
 import EvidenceDoc from './components/EvidenceDoc'
@@ -54,6 +55,7 @@ function Recorder({ view, setView, setRec, setError }) {
   const canvasRef = useRef(null)
   const timerRef = useRef(null)
   const eng = useRef(null)
+  const [notice, setNotice] = useState(null) // { short: "M:SS" } when a take was too short
   const recording = view === 'recording'
 
   // Draw the static frame (ruler + playhead) whenever the canvas mounts.
@@ -80,7 +82,7 @@ function Recorder({ view, setView, setRec, setError }) {
   }
 
   const start = async () => {
-    setError('')
+    setError(''); setNotice(null)
     let stream
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }) }
     catch { setError('Microphone access denied. The examiner needs the recording as evidence.'); return }
@@ -97,27 +99,31 @@ function Recorder({ view, setView, setRec, setError }) {
     loop()
   }
 
-  const submit = () => {
+  // Stop the take. A take under 4:30 is ALWAYS discarded with the "Be Brave"
+  // notice — whether stopped by the dial, Save, or the ✕. A full-length take is
+  // submitted on 'submit', or discarded quietly on an explicit ✕ ('cancel').
+  const stop = (intent) => {
     const E = eng.current
     if (!E) return
     E.recorder.onstop = () => {
       const secs = E.elapsed
       teardown(E)
+      eng.current = null
       if (secs < MIN_SEC) {
-        setError(`Only ${mmss(Math.floor(secs))} — the floor is 4:30. Take discarded. Begin again.`)
-        eng.current = null; setView('idle'); return
+        setNotice({ short: mmss(Math.floor(secs)) })
+        setView('idle'); return
       }
+      if (intent !== 'submit') { setView('idle'); return }
       const fd = new FormData()
       fd.append('file', new Blob(E.chunks, { type: 'audio/webm' }), 'monologue.webm')
-      eng.current = null
       setView('uploading')
       postForm('/api/recordings', fd).then((r) => { setRec(r); setView('report') })
         .catch((e) => { setError(e.message); setView('idle') })
     }
     E.recorder.stop()
   }
-
-  const cancel = () => { teardown(eng.current); eng.current = null; setError(''); setView('idle') }
+  const submit = () => stop('submit')
+  const cancel = () => stop('cancel')
 
   return (
     <div className="rec-stage">
@@ -128,10 +134,24 @@ function Recorder({ view, setView, setRec, setError }) {
       <div className="rec-wave"><canvas ref={canvasRef} className="rec-canvas"></canvas></div>
       <div className="rec-timer" ref={timerRef}>00:00.00</div>
       <Dial recording={recording} onClick={recording ? submit : start} />
-      <div className="rec-hint">
-        {recording ? 'Recording a single take — minimum 4:30. Tap the dial to stop and submit.'
-          : 'Tap the dial to begin a single, unbroken spoken take. Minimum 4:30; partial takes are filed as-is.'}
-      </div>
+
+      <AnimatePresence>
+        {notice && !recording && (
+          <motion.div className="rec-notice"
+            initial={{ opacity: 0, scale: .82, y: 6 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: .9 }} transition={{ type: 'spring', stiffness: 380, damping: 20 }}>
+            <div className="rec-notice-h">Be Brave — Speak More</div>
+            <div className="rec-notice-s">Only {notice.short} of the 4:30 minimum. The take was discarded — begin again.</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {!notice && (
+        <div className="rec-hint">
+          {recording ? 'Recording a single take — minimum 4:30. Tap the dial to stop and submit.'
+            : 'Tap the dial to begin a single, unbroken spoken take. Minimum 4:30; partial takes are filed as-is.'}
+        </div>
+      )}
     </div>
   )
 }
@@ -139,7 +159,7 @@ function Recorder({ view, setView, setRec, setError }) {
 function Dial({ recording, onClick }) {
   const ticks = [45, 135, 225, 315]
   return (
-    <svg className="rec-dial" viewBox="0 0 200 200" onClick={onClick} role="button" aria-label={recording ? 'Stop' : 'Record'}>
+    <svg className={`rec-dial${recording ? ' spin' : ''}`} viewBox="0 0 200 200" onClick={onClick} role="button" aria-label={recording ? 'Stop' : 'Record'}>
       <circle cx="100" cy="100" r="92" fill="none" stroke="#241f15" strokeWidth="1.5" />
       {ticks.map((a) => {
         const rad = (a * Math.PI) / 180
