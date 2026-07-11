@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
 import { get, post } from './api'
 import { shortDate, mmss } from './format'
-import EvidenceDoc from './components/EvidenceDoc'
 
-const VCODE = { passed: 'P', failed_final: 'F', failed_once: 'F', open: 'O', done: '✓' }
-const VTONE = { passed: 'dk-p', failed_final: 'dk-f', failed_once: 'dk-f', open: '', done: 'dk-p' }
-const VTEXT = { passed: 'PASS', failed_final: 'FAIL', failed_once: 'FAIL', open: 'OPEN', done: 'DONE' }
+const PILL = { passed: 'pass', failed_final: 'fail', failed_once: 'fail', open: 'open', done: 'pass' }
+const PTEXT = { passed: 'PASS', failed_final: 'FAIL', failed_once: 'FAIL', open: 'OPEN', done: 'DONE' }
+const TONE = { passed: 'dk-p', failed_final: 'dk-f', failed_once: 'dk-f', open: '', done: 'dk-p' }
 
-// PHASE 2 — the case-file archive, wired to /api/history. Day rows drill down to
-// their exhibits (tasks) and the recording audit. The glossary is live
-// (search + bulk paste). The weekly synthesis is read best-effort from the
-// export markdown — there is no dedicated synthesis endpoint (see DEVIATIONS).
+const hm = (min) => {
+  const m = Math.round(min || 0)
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`
+}
+const dayNum = (iso) => (iso ? iso.slice(8, 10) : '')
+const outcome = (d) =>
+  !d.summary_line ? { cls: 'progress', label: 'IN PROGRESS' }
+    : d.streak_day ? { cls: 'clean', label: 'CLEAN DAY' } : { cls: 'broken', label: 'BROKEN' }
+
+// PHASE 2 — History as plain day cards. Each day says in words how it went
+// (outcome chip, named task verdicts, focus time, streak), with a trends strip
+// on top (focus per day + spoken fluency) and an on-demand weekly synthesis.
 export default function History() {
   const [days, setDays] = useState(null)
   const [openDay, setOpenDay] = useState(null)
@@ -21,64 +28,101 @@ export default function History() {
   if (error) return <p className="s-err" style={{ marginTop: '30px' }}>{error}</p>
   if (!days) return <p className="dk-req" style={{ marginTop: '30px' }}>Loading the archive…</p>
 
-  const first = days.at(-1)?.date
-  const last = days[0]?.date
-  const range = first && last ? `${shortDate(first)} – ${shortDate(last)}` : ''
+  const range = days.length ? `${shortDate(days.at(-1).date)} – ${shortDate(days[0].date)}` : ''
+  const chrono = [...days].reverse()
+  const focusData = chrono.map((d) => ({ label: dayNum(d.date), v: d.focus_minutes || 0 }))
+  const focusMax = Math.max(1, ...focusData.map((d) => d.v))
+  const vocal = chrono
+    .map((d) => {
+      const r = [...d.recordings].reverse().find((x) => x.wpm != null)
+      return r ? { label: dayNum(d.date), v: r.fillers_per_min, wpm: r.wpm } : null
+    })
+    .filter(Boolean)
+  const vocalMax = Math.max(1, ...vocal.map((d) => d.v))
+  const lastWpm = vocal.length ? vocal[vocal.length - 1].wpm : null
 
   return (
     <>
-      <EvidenceDoc tabLeft="CASE-FILE ARCHIVE" tabRight={range} style={{ marginTop: '30px' }}>
-        <div style={{ padding: '4px 24px 18px' }}>
-          <div className="s-hrow"><span>DATE</span><span>FILE</span><span>EXHIBITS</span><span>SESSION</span><span>STREAK</span><span></span></div>
-          {days.length === 0 && <p className="dk-req">Nothing on file yet.</p>}
-          {days.map((d) => {
-            const open = openDay === d.date
-            const gated = d.tasks.filter((t) => t.type === 'gated')
-            const codes = gated.map((t, i) => `${String.fromCharCode(65 + i)}·${VCODE[t.status] || '?'}`).join(' ') || '—'
-            const recSec = d.recordings.reduce((n, r) => n + (r.duration_sec || 0), 0)
-            const streakM = (d.summary_line || '').match(/streak[^0-9]*(\d+)/i)
-            return (
-              <div key={d.date}>
-                <button className="s-drow" onClick={() => setOpenDay(open ? null : d.date)} type="button">
-                  <span className="fw7">{shortDate(d.date)}</span>
-                  <span className="s-muted">—</span>
-                  <span style={{ letterSpacing: '.06em' }}>{codes}</span>
-                  <span>{recSec ? `${mmss(recSec)}` : '—'}</span>
-                  <span>{streakM ? streakM[1] : '—'}</span>
-                  <span>{open ? '▾' : '▸'}</span>
-                </button>
-                {open && (
-                  <>
-                    {d.summary_line && <p className="dk-req" style={{ margin: '2px 0 12px', fontStyle: 'italic' }}>{d.summary_line}</p>}
-                    <div className="s-det">
-                      {gated.map((t, i) => (
-                        <div className="s-mini" key={t.id}>
-                          <div className="fx jb ac"><span className="s-lab">EXHIBIT {String.fromCharCode(65 + i)}</span><span className={`s-vs ${VTONE[t.status] || ''}`}>{VTEXT[t.status] || t.status}</span></div>
-                          <div className="fw7 mt8" style={{ fontSize: '14.5px', lineHeight: 1.35 }}>{t.title}</div>
-                          <div className="dk-req">Attempts {t.attempts} of 2</div>
-                          <div className="dk-dash"></div>
-                          <div className="fs12 mt8" style={{ fontStyle: 'italic', lineHeight: 1.5 }}>{t.reason || 'No verdict on file.'}</div>
-                        </div>
-                      ))}
-                      {d.recordings.map((r) => (
-                        <div className="s-mini" key={`r${r.id}`}>
-                          <div className="fx jb ac"><span className="s-lab">RECORDING</span><span className={`s-vs ${r.audit_viewed ? 'dk-p' : ''}`}>{r.audit_viewed ? 'AUDITED' : 'UNREAD'}</span></div>
-                          <div className="fw7 mt8" style={{ fontSize: '14.5px' }}>Spoken shadowing · {mmss(r.duration_sec)}</div>
-                          <div className="dk-dash"></div>
-                          <div className="fs12" style={{ lineHeight: 1.5, color: 'rgba(36,31,21,.8)', maxHeight: '120px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{r.audit}</div>
-                        </div>
-                      ))}
-                      {gated.length === 0 && d.recordings.length === 0 && (
-                        <div className="fs12 s-muted">No exhibits or recordings on this file.</div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            )
-          })}
+      <div className="s-trends">
+        <div className="s-chart-box">
+          <div className="s-lab">FOCUS PER DAY</div>
+          <BarChart data={focusData} max={focusMax} />
+          <div className="s-chart-cap">Minutes of logged focus sessions.</div>
         </div>
-      </EvidenceDoc>
+        <div className="s-chart-box">
+          <div className="s-lab">SPOKEN FLUENCY · FILLERS / MIN</div>
+          {vocal.length ? (
+            <>
+              <BarChart data={vocal} max={vocalMax} v />
+              <div className="s-chart-cap">Lower is better{lastWpm ? ` · latest ${lastWpm} wpm` : ''}.</div>
+            </>
+          ) : (
+            <div className="s-chart-empty">No drills audited yet. Record one on the RECORD tab and the trend appears here.</div>
+          )}
+        </div>
+      </div>
+
+      <div className="fx jb ac" style={{ marginTop: '30px' }}>
+        <div className="dk-osw fs14">CASE-FILE ARCHIVE</div>
+        <div className="fs13" style={{ opacity: .6 }}>{range}</div>
+      </div>
+
+      {days.length === 0 && <p className="dk-req" style={{ marginTop: '14px' }}>Nothing on file yet.</p>}
+
+      <div className="s-days">
+        {days.map((d) => {
+          const oc = outcome(d)
+          const gated = d.tasks.filter((t) => t.type === 'gated')
+          const simple = d.tasks.filter((t) => t.type === 'simple')
+          const ticksDone = simple.filter((t) => t.status === 'done').length
+          const rec = d.recordings.at(-1)
+          const open = openDay === d.date
+          return (
+            <div key={d.date} className="s-day">
+              <button className="s-day-head" type="button" onClick={() => setOpenDay(open ? null : d.date)}>
+                <span className="s-day-date">{shortDate(d.date)}</span>
+                <span className={`s-chip ${oc.cls}`}>{oc.label}</span>
+                <span className="s-pills">
+                  {gated.map((t) => (
+                    <span key={t.id} className={`s-pill ${PILL[t.status] || 'open'}`} title={t.title}>
+                      {t.title} — {PTEXT[t.status] || t.status}
+                    </span>
+                  ))}
+                  {simple.length > 0 && <span className="s-pill tick">{ticksDone}/{simple.length} TICKS</span>}
+                  {rec && <span className={`s-pill ${rec.audit_viewed ? 'pass' : 'open'}`}>VERBAL — {rec.audit_viewed ? 'AUDITED' : 'UNREAD'}</span>}
+                </span>
+                <span className="s-day-metric"><div className="s-metric-lab">FOCUS</div><div className="s-metric-val">{hm(d.focus_minutes)}</div></span>
+                <span className="s-day-metric"><div className="s-metric-lab">STREAK</div><div className="s-metric-val">{d.current_streak ?? '—'}</div></span>
+                <span className="s-day-car">{open ? '▾' : '▸'}</span>
+              </button>
+              {d.summary_line && <div className="s-day-sum">{d.summary_line}</div>}
+              {open && (
+                <div className="s-day-detail">
+                  {gated.map((t) => (
+                    <div className="s-mini" key={t.id}>
+                      <div className="fx jb ac"><span className="s-lab">GATED EXHIBIT</span><span className={`s-vs ${TONE[t.status] || ''}`}>{PTEXT[t.status] || t.status}</span></div>
+                      <div className="fw7 mt8" style={{ fontSize: '14.5px', lineHeight: 1.35 }}>{t.title}</div>
+                      <div className="dk-req">Attempts {t.attempts} of 2</div>
+                      <div className="dk-dash"></div>
+                      <div className="fs12" style={{ fontStyle: 'italic', lineHeight: 1.5 }}>{t.reason || 'No verdict on file.'}</div>
+                    </div>
+                  ))}
+                  {d.recordings.map((r) => (
+                    <div className="s-mini" key={`r${r.id}`}>
+                      <div className="fx jb ac"><span className="s-lab">VERBAL DRILL</span><span className={`s-vs ${r.audit_viewed ? 'dk-p' : ''}`}>{r.audit_viewed ? 'AUDITED' : 'UNREAD'}</span></div>
+                      <div className="fw7 mt8" style={{ fontSize: '14.5px' }}>{mmss(r.duration_sec)} single take</div>
+                      {r.wpm != null && <div className="dk-req">{r.wpm} wpm · {r.fillers_per_min}/min fillers · {Math.round(r.unique_ratio * 100)}% unique words</div>}
+                      <div className="dk-dash"></div>
+                      <div className="fs12" style={{ lineHeight: 1.5, color: 'rgba(36,31,21,.8)', maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{r.audit}</div>
+                    </div>
+                  ))}
+                  {gated.length === 0 && d.recordings.length === 0 && <div className="fs12 s-muted">No exhibits or recordings on this file.</div>}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
 
       <div className="s-panels">
         <Synthesis />
@@ -88,23 +132,47 @@ export default function History() {
   )
 }
 
-// Best-effort: pull the "## Weekly synthesis" section out of the export markdown.
-// There is no synthesis read endpoint; POST /api/review/weekly generates it.
+function BarChart({ data, max, v = false }) {
+  return (
+    <div className="s-chart">
+      {data.map((d, i) => (
+        <div className="s-bar-col" key={i}>
+          <div className={`s-bar${v ? ' v' : ''}`} style={{ height: `${Math.max(2, Math.round((d.v / max) * 100))}%` }} title={`${d.v}`}></div>
+          <span className="s-bar-lab">{d.label}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Weekly synthesis, read best-effort from the export markdown; the button
+// generates it on the spot (POST /api/review/weekly → LLM re-grade + synthesis).
 function Synthesis() {
   const [text, setText] = useState(undefined)
-  useEffect(() => {
+  const [running, setRunning] = useState(false)
+  const [err, setErr] = useState('')
+  const load = useCallback(() =>
     fetch('/api/export').then((r) => r.text()).then((md) => {
       const i = md.indexOf('## Weekly synthesis')
       setText(i >= 0 ? md.slice(i + '## Weekly synthesis'.length).trim() : null)
-    }).catch(() => setText(null))
-  }, [])
+    }).catch(() => setText(null)), [])
+  useEffect(() => { load() }, [load])
+
+  const run = () => {
+    setRunning(true); setErr('')
+    post('/api/review/weekly').then(() => load()).catch((e) => setErr(e.message)).finally(() => setRunning(false))
+  }
   return (
     <div className="s-panel">
-      <div className="s-lab">WEEKLY SYNTHESIS</div>
+      <div className="fx jb ac">
+        <div className="s-lab">WEEKLY SYNTHESIS</div>
+        <button className="s-run-btn" type="button" onClick={run} disabled={running}>{running ? 'ASSEMBLING…' : 'RUN WEEKLY REVIEW'}</button>
+      </div>
+      {err && <p className="s-err" style={{ margin: '10px 0 0' }}>{err}</p>}
       {text === undefined && <p className="fs13" style={{ marginTop: '12px' }}>Loading…</p>}
-      {text === null && (
+      {text === null && !err && (
         <p className="fs13" style={{ lineHeight: 1.65, margin: '12px 0 0' }}>
-          No synthesis on file yet. Run the weekly review to have the examiner assemble one from the week’s record.
+          No synthesis on file yet. Run the weekly review — the examiner re-grades a sample of the week’s passes and assembles a synthesis from the record.
         </p>
       )}
       {text && <p className="fs13" style={{ lineHeight: 1.65, margin: '12px 0 0', whiteSpace: 'pre-wrap' }}>{text}</p>}
