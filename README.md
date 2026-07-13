@@ -51,9 +51,10 @@ retry. Submitted answers and artifacts are immutable once recorded, the
 one-retry-per-day cap is enforced at the database layer, and untrusted input is
 isolated so it cannot inject a verdict.
 
-**Privacy:** your audio never leaves your machine. Recordings are transcribed
-**locally** with faster-whisper; only the resulting transcript text and a few
-computed statistics are sent to the LLM for the audit.
+**Privacy:** recordings are transcribed by NVIDIA's hosted Riva ASR
+(whisper-large-v3). The audio is converted to mono 16-bit WAV and sent over an
+encrypted gRPC channel to NVIDIA for transcription; only the resulting transcript
+text and a few computed statistics are then sent to the LLM for the audit.
 
 ## Interface
 
@@ -65,7 +66,7 @@ meant to read as an instrument of record, not an app that congratulates you.
 ## Tech stack
 
 - **Backend** — Python · FastAPI · SQLAlchemy · SQLite (WAL, numbered migrations,
-  triggers) · faster-whisper (local transcription) · ffmpeg · NVIDIA NIM (evaluation).
+  triggers) · NVIDIA Riva hosted ASR (whisper-large-v3, transcription) · ffmpeg · NVIDIA NIM (evaluation).
 - **Frontend** — React 19 · Vite · Tailwind CSS · Framer Motion.
 
 ## Getting started (local)
@@ -93,13 +94,9 @@ cd frontend && npm run dev
 xdg-open http://localhost:5173
 ```
 
-The first recording downloads the `small` faster-whisper model (~460 MB) into
-`~/.cache/huggingface`; the upload will pause once while it does. Pre-download it
-with:
-
-```bash
-.venv/bin/python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
-```
+Transcription runs on NVIDIA's hosted Riva ASR, so there is no local model to
+download — the first upload transcribes as quickly as any later one. It uses the
+same `NVIDIA_API_KEY` as the evaluator; no extra setup.
 
 **Optional nightly auto-close** (`crontab -e`):
 

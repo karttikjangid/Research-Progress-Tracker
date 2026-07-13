@@ -1,0 +1,13 @@
+# Continuous SQLite → Supabase Storage (S3) replication.
+# All values come from the environment (set as Space/host secrets); nothing
+# sensitive is committed. Litestream reads LITESTREAM_ACCESS_KEY_ID and
+# LITESTREAM_SECRET_ACCESS_KEY from the environment automatically.
+dbs:
+  - path: ${SENTINEL_DB_PATH}
+    replicas:
+      - type: s3
+        endpoint: ${SUPABASE_S3_ENDPOINT}
+        bucket: ${SUPABASE_S3_BUCKET}
+        path: db
+        region: ${SUPABASE_S3_REGION}
+        force-path-style: true

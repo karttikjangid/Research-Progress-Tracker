@@ -41,7 +41,7 @@ export default function Record() {
           {view === 'uploading' && (
             <div className="tc" style={{ padding: '46px 40px 40px' }}>
               <div className="s-lab">UPLOADING · TRANSCRIBING · AUDITING</div>
-              <div className="dk-req mt12">First run downloads the transcription model — this can take minutes.</div>
+              <div className="dk-req mt12">Transcribing your take and running the audit — this can take up to a minute.</div>
             </div>
           )}
           {view === 'report' && rec && <AuditReport rec={rec} onViewed={() => setRec({ ...rec, audit_viewed: true })} />}
@@ -99,10 +99,9 @@ function Recorder({ view, setView, setRec, setError }) {
     loop()
   }
 
-  // Stop the take. A take under 4:30 is ALWAYS discarded with the "Be Brave"
-  // notice — whether stopped by the dial, Save, or the ✕. A full-length take is
-  // submitted on 'submit', or discarded quietly on an explicit ✕ ('cancel').
-  const stop = (intent) => {
+  // Stop the take and submit it — used by both the dial and SAVE. A take under
+  // the 4:30 floor can't be filed, so it's discarded with the "Be Brave" notice.
+  const submit = () => {
     const E = eng.current
     if (!E) return
     E.recorder.onstop = () => {
@@ -113,7 +112,6 @@ function Recorder({ view, setView, setRec, setError }) {
         setNotice({ short: mmss(Math.floor(secs)) })
         setView('idle'); return
       }
-      if (intent !== 'submit') { setView('idle'); return }
       const fd = new FormData()
       fd.append('file', new Blob(E.chunks, { type: 'audio/webm' }), 'monologue.webm')
       setView('uploading')
@@ -122,13 +120,29 @@ function Recorder({ view, setView, setRec, setError }) {
     }
     E.recorder.stop()
   }
-  const submit = () => stop('submit')
-  const cancel = () => stop('cancel')
+
+  // The ✕ is a hard reset, not a submit: abandon any take in progress, tear down
+  // audio, and return every control to its pristine idle state — timer, waveform,
+  // notice, error. No "too short" notice; this is a deliberate discard.
+  const reset = () => {
+    const E = eng.current
+    eng.current = null
+    if (E) {
+      E.recorder.ondataavailable = null
+      E.recorder.onstop = null
+      try { E.recorder.stop() } catch { /* recorder never started */ }
+      teardown(E)
+    }
+    setNotice(null); setError('')
+    if (timerRef.current) timerRef.current.textContent = fmtCenti(0)
+    if (canvasRef.current) draw(canvasRef.current, [], 0)
+    setView('idle')
+  }
 
   return (
     <div className="rec-stage">
       <div className="rec-top">
-        <button className="rec-x" onClick={cancel} type="button" title="Discard the take">✕</button>
+        <button className="rec-x" onClick={reset} type="button" title="Discard the take and reset">✕</button>
         <button className="rec-save" onClick={submit} type="button" disabled={!recording}>SAVE &amp; SUBMIT</button>
       </div>
       <div className="rec-wave"><canvas ref={canvasRef} className="rec-canvas"></canvas></div>

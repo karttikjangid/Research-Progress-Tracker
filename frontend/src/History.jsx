@@ -116,7 +116,23 @@ export default function History() {
                       <div className="fs12" style={{ lineHeight: 1.5, color: 'rgba(36,31,21,.8)', maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{r.audit}</div>
                     </div>
                   ))}
-                  {gated.length === 0 && d.recordings.length === 0 && <div className="fs12 s-muted">No exhibits or recordings on this file.</div>}
+                  {d.reflection && (
+                    <div className="s-mini">
+                      <div className="s-lab">END-OF-DAY CONSOLIDATION</div>
+                      <div className="fs13 mt8" style={{ lineHeight: 1.5 }}>
+                        <span className="fw7">Understood:</span> {d.reflection.understood || '—'}
+                      </div>
+                      {d.reflection.sticking_point && (
+                        <>
+                          <div className="dk-dash"></div>
+                          <div className="fs12" style={{ lineHeight: 1.5, fontStyle: 'italic' }}>
+                            <span className="fw7">Stuck on:</span> {d.reflection.sticking_point}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {gated.length === 0 && d.recordings.length === 0 && !d.reflection && <div className="fs12 s-muted">No exhibits, recordings, or reflection on this file.</div>}
                 </div>
               )}
             </div>

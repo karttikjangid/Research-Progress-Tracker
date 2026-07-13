@@ -17,6 +17,7 @@ def at(app, iso):
 
 
 TL_LINE = "Training arm felt clean; eval arm dragged and I dreaded every minute."
+UNDERSTOOD = "I can now derive the SVD from the spectral theorem without notes."
 
 
 # ---------- sessions: concurrency + duration ----------
@@ -122,33 +123,64 @@ def test_non_struggle_kind_does_not_honor(client, app):
 
 # ---------- tastelog: validation + immutability ----------
 
-def test_tastelog_one_liner_bounds_and_arm(client, app):
+def test_tastelog_field_bounds(client, app):
     at(app, "2026-07-13T09:00:00+00:00")
-    def body(one_liner, drift="training"):
-        return {"drift_arm": drift, "dread_arm": "eval", "one_liner": one_liner}
-    # 422s fail validation before any row is written, so the date stays free
-    assert client.post("/api/tastelog", json=body("x" * 19)).status_code == 422
-    assert client.post("/api/tastelog", json=body("x" * 201)).status_code == 422
-    assert client.post("/api/tastelog", json=body("z" * 30, drift="sideways")).status_code == 422
-    # the 20-char lower boundary is valid and is the first row to land
-    assert client.post("/api/tastelog", json=body("a" * 20)).status_code == 201
+    # understood is required, 10–500 chars; 422s land before any row is written
+    assert client.post("/api/tastelog", json={"understood": "x" * 9}).status_code == 422
+    assert client.post("/api/tastelog", json={"understood": "x" * 501}).status_code == 422
+    # a sticking point, when given, shares the 10-char floor
+    assert client.post("/api/tastelog",
+                       json={"understood": "x" * 20, "sticking_point": "short"}).status_code == 422
+    # understood alone (no sticking point) is valid and is the first row to land
+    assert client.post("/api/tastelog", json={"understood": "y" * 10}).status_code == 201
+
+
+def test_history_surfaces_reflection(client, app):
+    at(app, "2026-07-13T21:00:00+00:00")
+    client.post("/api/tastelog", json={
+        "understood": "The SVD falls straight out of the spectral theorem now.",
+        "sticking_point": "Rank-deficiency and the Gram-Schmidt basis extension."})
+    # a reflection-only day (no task/recording) still appears in History...
+    day = next(d for d in client.get("/api/history").json() if d["date"] == "2026-07-13")
+    assert day["reflection"]["understood"].startswith("The SVD")
+    assert "Gram-Schmidt" in day["reflection"]["sticking_point"]
+    # ...but the reflection anchor task is never surfaced as a task
+    assert day["tasks"] == []
 
 
 def test_tastelog_immutable_once_written(client, app):
     at(app, "2026-07-13T09:00:00+00:00")
-    assert client.post("/api/tastelog", json={"drift_arm": "training", "dread_arm": "eval",
-                                              "one_liner": TL_LINE}).status_code == 201
+    assert client.post("/api/tastelog", json={"understood": UNDERSTOOD}).status_code == 201
     # second POST for the same date is refused
-    assert client.post("/api/tastelog", json={"drift_arm": "none", "dread_arm": "none",
-                                              "one_liner": TL_LINE + " changed"}).status_code == 409
+    assert client.post("/api/tastelog",
+                       json={"understood": UNDERSTOOD + " changed"}).status_code == 409
     # db-layer backstop, same pattern as Task.answer
     from db import ImmutableField, SessionLocal, TasteLog
     s = SessionLocal()
     tl = s.get(TasteLog, "2026-07-13")
     with pytest.raises(ImmutableField):
-        tl.drift_arm = "eval"
+        tl.understood = "rewritten"
     s.close()
-    assert client.get("/api/tastelog?date=2026-07-13").json()["drift_arm"] == "training"
+    assert client.get("/api/tastelog?date=2026-07-13").json()["understood"] == UNDERSTOOD
+
+
+def test_sticking_point_schedules_review_next_day(client, app):
+    at(app, "2026-07-13T21:00:00+00:00")
+    r = client.post("/api/tastelog", json={
+        "understood": "Finally see why A^T A is positive semi-definite.",
+        "sticking_point": "Why rank-deficiency forces Gram-Schmidt to extend the basis."})
+    assert r.status_code == 201
+    # the reflection anchor is invisible among the day's real tasks
+    assert client.get("/api/tasks?date=2026-07-13").json()["tasks"] == []
+    # nothing due the day it is written; exactly one retrieval due the next day
+    assert client.get("/api/reviews/due?date=2026-07-13").json() == []
+    due = client.get("/api/reviews/due?date=2026-07-14").json()
+    assert len(due) == 1 and due[0]["title"].startswith("STICKING POINT —")
+    # reveal surfaces the sticking-point text; grading advances FSRS and closes it
+    rev = client.post(f"/api/reviews/{due[0]['id']}/reveal").json()
+    assert "Gram-Schmidt" in rev["artifact"]
+    graded = client.post(f"/api/reviews/{due[0]['id']}/grade", json={"grade": "partial"}).json()
+    assert graded["status"] == "done"
 
 
 def test_get_tastelog_absent_is_null(client, app):
@@ -206,8 +238,7 @@ def test_day_close_flags_missing_tastelog(client, app):
     at(app, "2026-07-13T23:00:00+00:00")
     assert "TASTELOG MISSING" in client.post("/api/day/close").json()["summary_line"]
     # add the tastelog, re-close → flag gone (line changed, so a fresh close)
-    client.post("/api/tastelog", json={"drift_arm": "eval", "dread_arm": "eval",
-                                       "one_liner": TL_LINE})
+    client.post("/api/tastelog", json={"understood": UNDERSTOOD})
     assert "TASTELOG MISSING" not in client.post("/api/day/close").json()["summary_line"]
 
 

@@ -111,7 +111,8 @@ def _daily_maintenance():
 def _catch_up():
     s = SessionLocal()
     try:
-        dates = ({d for (d,) in s.query(Task.date)}
+        dates = ({d for (d,) in s.query(Task.date)
+                  .filter(Task.type != "reflection")}
                  | {d for (d,) in s.query(Recording.date)})
         for date in sorted(dates):
             if date < today() and not s.get(DayLog, date):
@@ -190,7 +191,8 @@ class TaskCreate(BaseModel):
 @app.get("/api/tasks")
 def list_tasks(date: str | None = None, s=Depends(db)):
     date = date or today()
-    tasks = s.query(Task).filter(Task.date == date).order_by(Task.id).all()
+    tasks = (s.query(Task).filter(Task.date == date, Task.type != "reflection")
+             .order_by(Task.id).all())
     rec = (s.query(Recording).filter(Recording.date == date)
            .order_by(Recording.id.desc()).first())
     return {"date": date,
@@ -279,7 +281,8 @@ def _similar_questions(s, t: Task) -> list[str]:
     """Last 5 questions asked for tasks with title-token overlap (naive)."""
     words = _title_tokens(t.title)
     out = []
-    for other in (s.query(Task).filter(Task.id != t.id, Task.question != "")
+    for other in (s.query(Task).filter(Task.id != t.id, Task.question != "",
+                                       Task.type != "reflection")
                   .order_by(Task.id.desc()).limit(100)):
         if words & _title_tokens(other.title):
             out.append(other.question)
@@ -524,9 +527,13 @@ def _process(r: Recording, s) -> dict:
             infra.log.error("recording %s: audit failed: %s", r.id, e)
             raise HTTPException(503, f"{e} — POST /api/recordings/{r.id}/retry")
         ap.write_text(audit)
+    # Store the text in the DB too, so the record survives an ephemeral-disk
+    # restart (Litestream replicates the DB; the files on disk are not).
+    r.transcript_text = tp.read_text()
+    r.audit_text = ap.read_text()
     r.status = "done"
     s.commit()
-    return {**r.as_dict(), "audit": ap.read_text(), "transcript": tp.read_text()}
+    return {**r.as_dict(), "audit": r.audit_text, "transcript": r.transcript_text}
 
 
 @app.post("/api/recordings", status_code=201)
@@ -715,28 +722,52 @@ def end_session(sid: int, body: SessionEnd | None = None, s=Depends(db)):
     return sess.as_dict()
 
 
-# ---------- tastelog (immutable end-of-day judgment) ----------
+# ---------- tastelog (immutable end-of-day consolidation) ----------
+# The end-of-day reflection: what you can explain now that you couldn't this
+# morning (retrieval/consolidation), and the day's hardest sticking point. A
+# non-empty sticking point is scheduled as tomorrow's spaced-repetition review.
+
+# Fixed retrieval cue shown when a sticking-point review comes due.
+STICKING_POINT_Q = ("Yesterday this was your hardest sticking point. Can you "
+                    "resolve or explain it now, in your own words? If not, it recurs.")
+
 
 class TasteLogIn(BaseModel):
-    drift_arm: str
-    dread_arm: str
-    one_liner: str
+    understood: str
+    sticking_point: str = ""
     date: str | None = None
 
-    @field_validator("drift_arm", "dread_arm")
+    @field_validator("understood")
     @classmethod
-    def _arm(cls, v):
-        if v not in ARMS:
-            raise ValueError(f"arm must be one of {', '.join(ARMS)}")
+    def _understood(cls, v):
+        v = v.strip()
+        if not 10 <= len(v) <= 500:
+            raise ValueError("understood must be 10–500 chars")
         return v
 
-    @field_validator("one_liner")
+    @field_validator("sticking_point")
     @classmethod
-    def _liner(cls, v):
-        v = v.strip()
-        if not 20 <= len(v) <= 200:
-            raise ValueError("one_liner must be 20–200 chars")
+    def _sp(cls, v):
+        v = (v or "").strip()
+        if v and not 10 <= len(v) <= 500:
+            raise ValueError("sticking_point, if given, must be 10–500 chars")
         return v
+
+
+def _seed_sticking_point_review(s, date: str, text: str):
+    """Turn the day's sticking point into tomorrow's retrieval. It anchors to an
+    inert `reflection` task (invisible in the fan/ticks, exempt from the gated
+    cap, never transitions) purely so the existing FSRS review machinery — due
+    list, reveal, self-grade, chaining — surfaces and schedules it unchanged."""
+    tomorrow = (dt.date.fromisoformat(date) + dt.timedelta(days=1)).isoformat()
+    cue = text if len(text) <= 100 else text[:99] + "…"
+    t = Task(date=date, title=f"STICKING POINT — {cue}", type="reflection")
+    t.artifact = text
+    t.question = STICKING_POINT_Q
+    s.add(t)
+    s.flush()  # need t.id for the review
+    s.add(Review(source_task_id=t.id, due_date=tomorrow,
+                 fsrs_card_state=json.dumps(Card().to_dict()), status="due"))
 
 
 @app.post("/api/tastelog", status_code=201)
@@ -744,11 +775,12 @@ def create_tastelog(body: TasteLogIn, s=Depends(db)):
     date = body.date or today()
     if s.get(TasteLog, date):
         raise HTTPException(409, "tastelog for this date is already written — immutable")
-    tl = TasteLog(date=date, drift_arm=body.drift_arm,
-                  dread_arm=body.dread_arm, one_liner=body.one_liner)
-    s.add(tl)
+    s.add(TasteLog(date=date, understood=body.understood,
+                   sticking_point=body.sticking_point))
+    if body.sticking_point:
+        _seed_sticking_point_review(s, date, body.sticking_point)
     s.commit()
-    return tl.as_dict()
+    return s.get(TasteLog, date).as_dict()
 
 
 @app.get("/api/tastelog")
@@ -770,9 +802,13 @@ def tastelog_verdict(from_: str | None = Query(None, alias="from"),
         raise HTTPException(422, "from/to must be YYYY-MM-DD")
     drift = {a: 0 for a in ARMS}
     dread = {a: 0 for a in ARMS}
+    # Only the retired drift/dread experiment rows carry arm attributions; new
+    # reflection rows leave them "" and are simply not counted here.
     for tl in s.query(TasteLog).filter(TasteLog.date >= from_, TasteLog.date <= to):
-        drift[tl.drift_arm] += 1
-        dread[tl.dread_arm] += 1
+        if tl.drift_arm in drift:
+            drift[tl.drift_arm] += 1
+        if tl.dread_arm in dread:
+            dread[tl.dread_arm] += 1
     minutes: dict[str, float] = {}
     aborted = 0
     for x in s.query(WorkSession).filter(WorkSession.date >= from_, WorkSession.date <= to):
@@ -954,6 +990,9 @@ def _streak_values(s, date: str, timer_honored: bool) -> dict:
         Task.date == date, Task.status == "failed_final").count() > 0
     cutoff = (dt.date.fromisoformat(date)
               - dt.timedelta(days=MAX_OVERDUE_STREAK_DAYS)).isoformat()
+    # Deliberate: sticking-point reviews (source task type "reflection") count
+    # here too — ignoring a logged sticking point breaks the streak exactly like
+    # a lapsed passed-task review, to enforce follow-through on retrieval.
     overdue = s.query(Review).filter(
         Review.status == "due", Review.due_date < cutoff).count() > 0
     streak_day = bool(timer_honored) and not failed_final and not overdue
@@ -1045,8 +1084,8 @@ def _export_markdown(s, from_: str, to: str) -> str:
     """The weekly artifact. Core tables (tasks/recordings/day_log/vocab/drift/
     audit) are always present; sessions, tastelog and syntheses are optional and
     each wrapped so a build without them still assembles."""
-    dset = {d for (d,) in s.query(Task.date).union(s.query(Recording.date))
-            .union(s.query(DayLog.date))}
+    dset = {d for (d,) in s.query(Task.date).filter(Task.type != "reflection")
+            .union(s.query(Recording.date)).union(s.query(DayLog.date))}
     dset |= _opt(lambda: {d for (d,) in s.query(WorkSession.date)}, set())
     dset |= _opt(lambda: {d for (d,) in s.query(TasteLog.date)}, set())
     dates = sorted(d for d in dset if from_ <= d <= to)
@@ -1062,7 +1101,8 @@ def _export_markdown(s, from_: str, to: str) -> str:
         else:
             head += " — never closed"
         out.append(head)
-        for t in s.query(Task).filter(Task.date == date).order_by(Task.id):
+        for t in (s.query(Task).filter(Task.date == date, Task.type != "reflection")
+                  .order_by(Task.id)):
             line = f"- [{t.status}] ({t.type}) {t.title}"
             if t.verdict:
                 line += f" — {t.verdict}: {t.reason}"
@@ -1083,7 +1123,12 @@ def _export_markdown(s, from_: str, to: str) -> str:
                 line += f" ABORTED ({sess.abort_trigger})"
             out.append(line)
         tl = tastes.get(date)
-        if tl:
+        if tl and (tl.understood or tl.sticking_point):
+            line = f"- [reflection] understood: {tl.understood or '—'}"
+            if tl.sticking_point:
+                line += f" | stuck: {tl.sticking_point}"
+            out.append(line)
+        elif tl:  # legacy drift/dread experiment rows
             out.append(f"- [tastelog] drift→{tl.drift_arm}, dread→{tl.dread_arm}: {tl.one_liner}")
         out.append("")
 
@@ -1141,17 +1186,23 @@ def week():
 
 @app.get("/api/history")
 def history(s=Depends(db)):
-    dates = sorted({d for (d,) in s.query(Task.date).union(s.query(Recording.date))},
-                   reverse=True)
+    # A day with only an end-of-day reflection (no task/recording) still belongs
+    # in History, so union in tastelog dates — but NOT reflection anchor tasks
+    # (those would double-count and, in _catch_up, spuriously late-close a day).
+    dates = sorted({d for (d,) in s.query(Task.date)
+                    .filter(Task.type != "reflection").union(s.query(Recording.date))
+                    .union(s.query(TasteLog.date))}, reverse=True)
     out = []
     for date in dates:
         recs = []
         for r in s.query(Recording).filter(Recording.date == date).order_by(Recording.id):
             d = r.as_dict()
-            try:
-                d["audit"] = Path(r.audit_path).read_text()
-            except OSError:
-                d["audit"] = "(audit file missing)"
+            d["audit"] = r.audit_text  # durable copy; fall back to the file for pre-017 rows
+            if not d["audit"]:
+                try:
+                    d["audit"] = Path(r.audit_path).read_text()
+                except OSError:
+                    d["audit"] = "(audit file missing)"
             recs.append(d)
         log = s.get(DayLog, date)
         try:  # per-day focus minutes from completed, non-aborted work sessions
@@ -1160,10 +1211,19 @@ def history(s=Depends(db)):
                                       if not w.aborted and w.actual_minutes), 1)
         except Exception:
             focus_minutes = 0
+        tl = s.get(TasteLog, date)
+        reflection = None
+        if tl and (tl.understood or tl.sticking_point or tl.one_liner):
+            # understood is the live field; fall back to the legacy one_liner so
+            # old drift/dread-era rows still show their line.
+            reflection = {"understood": tl.understood or tl.one_liner,
+                          "sticking_point": tl.sticking_point}
         out.append({"date": date,
                     "tasks": [t.as_dict() for t in
-                              s.query(Task).filter(Task.date == date).order_by(Task.id)],
+                              s.query(Task).filter(Task.date == date,
+                                                   Task.type != "reflection").order_by(Task.id)],
                     "recordings": recs,
+                    "reflection": reflection,
                     "summary_line": log.summary_line if log else None,
                     "streak_day": bool(log.streak_day) if log else None,
                     "current_streak": log.current_streak if log else None,

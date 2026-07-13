@@ -130,6 +130,8 @@ def detect_silences(path: str, noise_db: float = -30.0,
 _RIVA_URI = "grpc.nvcf.nvidia.com:443"
 _RIVA_FUNCTION_ID = "b702f636-f60c-4a3d-a6f4-f3568c13bd7d"
 _RIVA_SAMPLE_RATE = 16000  # mono 16-bit PCM we transcode to below
+_RIVA_TIMEOUT = 120        # hard client deadline per attempt (a 7–8 min take is well under)
+_RIVA_RETRIES = 2          # extra attempts on transient gRPC errors, backoff 1s then 2s
 _riva_asr = None  # cached ASRService after the first successful connect
 
 
@@ -163,6 +165,37 @@ def _riva_service():
     return _riva_asr
 
 
+def _offline_recognize(data: bytes, config):
+    """Hosted transcription is a network call, so give it a hard deadline and a
+    bounded retry on transient gRPC failures — mirroring the evaluator client in
+    llm.py, which the old CPU-bound faster-whisper path never needed. Without
+    this a stalled NVCF connection blocks the (synchronous) upload request
+    forever; a single transient blip would otherwise burn the recording straight
+    to transcription_failed. Non-transient errors (bad auth, invalid arg) raise
+    at once — retrying won't help."""
+    import time
+
+    import grpc
+    transient = {grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED,
+                 grpc.StatusCode.RESOURCE_EXHAUSTED, grpc.StatusCode.ABORTED}
+    svc = _riva_service()
+    last = None
+    for attempt in range(_RIVA_RETRIES + 1):
+        if attempt:
+            time.sleep(attempt)  # 1s, 2s
+        try:
+            future = svc.offline_recognize(data, config, future=True)
+            return future.result(timeout=_RIVA_TIMEOUT)
+        except grpc.FutureTimeoutError:
+            last = f"Riva ASR timed out after {_RIVA_TIMEOUT}s"
+        except grpc.RpcError as e:
+            code = e.code()
+            if code not in transient:
+                raise RuntimeError(f"Riva ASR failed: {code.name}: {e.details()}") from e
+            last = f"Riva ASR transient {code.name}"
+    raise RuntimeError(last or "Riva ASR failed")
+
+
 def transcribe(path: str) -> str:
     global last_gaps
     import riva.client
@@ -178,7 +211,7 @@ def transcribe(path: str) -> str:
             max_alternatives=1,
             enable_automatic_punctuation=True,
         )
-        response = _riva_service().offline_recognize(data, config)
+        response = _offline_recognize(data, config)
     finally:
         try:
             os.remove(wav)
