@@ -12,3 +12,6 @@ backups/
 logs/
 .agents/
 .claude/
+graphify-out/
+assets/
+roadmap.json

@@ -202,15 +202,19 @@ function Glossary() {
   const [rows, setRows] = useState([])
   const [paste, setPaste] = useState('')
   const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
   const search = useCallback((query) =>
     get(`/api/glossary?q=${encodeURIComponent(query)}`).then(setRows).catch(() => setRows([])), [])
   useEffect(() => { search('') }, [search])
 
-  const submit = () =>
+  const submit = () => {
+    if (busy) return
+    setBusy(true)
     post('/api/glossary', { paste }).then((r) => {
       setMsg(`added ${r.added.length}, rejected ${r.rejected.length}`)
       setPaste(''); search(q)
-    }).catch((e) => setMsg(e.message))
+    }).catch((e) => setMsg(e.message)).finally(() => setBusy(false))
+  }
 
   return (
     <div className="s-panel">
@@ -231,7 +235,7 @@ function Glossary() {
       <textarea className="s-ta mt12" rows={3} value={paste} onChange={(e) => setPaste(e.target.value)}
         placeholder="Bulk paste: | symbol | type | meaning | source |" />
       <div className="fx ac gap8" style={{ marginTop: '10px' }}>
-        <button className="s-mini-btn" type="button" onClick={submit} disabled={!paste.trim()}>ADD ROWS</button>
+        <button className="s-mini-btn" type="button" onClick={submit} disabled={busy || !paste.trim()}>{busy ? 'ADDING…' : 'ADD ROWS'}</button>
         {msg && <span className="s-hint" style={{ margin: 0 }}>{msg}</span>}
       </div>
     </div>
