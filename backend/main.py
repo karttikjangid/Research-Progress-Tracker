@@ -1231,6 +1231,33 @@ def history(s=Depends(db)):
     return out
 
 
+# ---- roadmap (read-only 90-day case strategy) ---------------------------
+# The plan lives in roadmap.json at the repo root; ROADMAP_PATH overrides it.
+# A missing or malformed file yields an empty roadmap rather than a 500, so the
+# ROADMAP tab shows a clean "no roadmap on file" state instead of an error.
+@app.get("/api/roadmap")
+def roadmap():
+    path = Path(os.getenv("ROADMAP_PATH", str(ROOT / "roadmap.json")))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {"meta": None, "phases": []}
+    return {"meta": data.get("meta"), "phases": data.get("phases", [])}
+
+
+# ---- daily operating protocol (read-only) -------------------------------
+# The daily routine lives in Daily_protocol.json at the repo root;
+# PROTOCOL_PATH overrides it. A missing/malformed file yields {} so the
+# PROTOCOL tab shows a clean empty state rather than a 500.
+@app.get("/api/protocol")
+def protocol():
+    path = Path(os.getenv("PROTOCOL_PATH", str(ROOT / "Daily_protocol.json")))
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, ValueError):
+        return {}
+
+
 # Serve the built frontend (production). Mounted LAST so every /api route above
 # takes precedence; skipped in local dev where the Vite dev server serves the UI
 # and this directory doesn't exist.

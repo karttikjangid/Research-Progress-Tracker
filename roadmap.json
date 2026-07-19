@@ -1,0 +1,261 @@
+{
+  "meta": {
+    "owner": "Kartik",
+    "window": "2026-07-15 to 2026-10-15",
+    "goal": "Field decision (Oct 15) + artifacts + fluency baseline for ThinkSwiss outreach (Nov waves, letter by Dec 20, application by Jan 15 2027)",
+    "definition_of_done_per_ticket": "code_proof passes AND closed-book reconstruction_gate passes on paper. Deadlines are scheduling aids, NEVER completion criteria. A ticket closed at recognition-depth is a failed ticket with a checkmark.",
+    "daily_template": {
+      "theory_block": "14:00-15:30, pen and paper, peak cognition window",
+      "verification_block": "15:30-16:15, NumPy/PyTorch adversarial check of the day's theory",
+      "decode_rep": "20 min, 4x/week, one equation block from a real paper, from Phase B onward",
+      "gsoc": "morning slot",
+      "struggle_timer_ladder": "20 min (Jul 15-21), 30 min (Jul 22 - Aug 4), 45 min (Aug 5 onward, permanent)"
+    },
+    "rules": {
+      "frustration_spike": "Topic-switching and YouTube are BANNED mid-timer. A walk is legal only after writing one hypothesis-stack line stating the exact stall point; max 10 min; return to the same line.",
+      "ai_usage": "AI never explains first. You derive/decode/translate first; AI checks, attacks, and quizzes after. Hint ladders only when the timer expires.",
+      "training_runs": "When a run diverges: write a one-line diagnosis (logic bug vs hyperparameter collapse) BEFORE touching anything, then test that hypothesis.",
+      "compute": "Local GTX 1650 first. Kaggle free GPU (~30 hrs/week) for overflow batch runs only — notebooks are for training, never for exploratory procrastination. No paid cloud.",
+      "banned_this_window": ["CMU 10-414", "FastAPI/web-backend learning", "new productivity tooling", "plan redesigns", "third-opinion collection", "EBM/statistical-physics deep dive (deferred until a target lab demands it)"]
+    }
+  },
+  "phases": [
+    {
+      "id": "A",
+      "name": "Foundation rebuild",
+      "window": "2026-07-15 to 2026-08-09",
+      "note": "Highest-capacity 3.5 weeks (pre-semester). Two parallel tracks: linear algebra + matrix calculus; probability from the true beginning.",
+      "tickets": [
+        {
+          "id": "A1",
+          "topic": "Linear algebra as geometry",
+          "subtopics": [
+            "matrices as linear maps: what they DO to space",
+            "column space, rank, null space",
+            "eigenvectors/eigenvalues: geometric meaning before computation",
+            "symmetric (A = A^T) vs orthogonal (A A^T = I) — the exact confusion from probe 1, separated permanently",
+            "spectral theorem for symmetric matrices: real eigenvalues, orthogonal eigenvectors",
+            "SVD as rotate-scale-rotate; A^T A has no negative eigenvalues (probe 5)"
+          ],
+          "resources": [
+            "3Blue1Brown, Essence of Linear Algebra, episodes 1-10 (geometric layer)",
+            "MIT 18.06 (Strang): lectures 1-8, 21-22",
+            "Trefethen & Bau lectures 4-5 (SVD) as the capstone read"
+          ],
+          "deadline": "2026-07-26",
+          "code_proof": "NumPy: apply a symmetric, an orthogonal, and a generic 2x2 matrix to the unit circle and plot all three; verify spectral theorem numerically on a random symmetric matrix; construct A with rank deficiency and show what SVD reveals that eigendecomposition cannot.",
+          "reconstruction_gate": "Closed book: state spectral theorem precisely; prove A^T A is PSD in 3 lines; explain symmetric-vs-orthogonal to a rubber duck without conflation."
+        },
+        {
+          "id": "A2",
+          "topic": "Matrix calculus",
+          "subtopics": [
+            "scalar-by-vector and scalar-by-matrix gradients; shape discipline (write every shape)",
+            "Jacobians; the vector chain rule",
+            "grad of x^T A x (general and symmetric A) — probe 1 retaken properly",
+            "grad_W ||XW - y||^2 — probe 2 retaken properly",
+            "grad of softmax + cross-entropy composite",
+            "finite-difference verification as a permanent habit"
+          ],
+          "resources": [
+            "Parr & Howard, 'The Matrix Calculus You Need For Deep Learning' — FULL, every identity re-derived on paper before turning the page. This paper defeated you once; it is now both curriculum and calibration instrument."
+          ],
+          "deadline": "2026-08-02",
+          "code_proof": "Hand-derive then finite-difference-check (5 random points each): grad x^T A x, grad_W ||XW - y||^2, grad of 2-layer MLP loss w.r.t. both weight matrices. Checks must include one near-boundary/ill-conditioned point.",
+          "reconstruction_gate": "Closed book: probes 1 and 2 from the diagnostic, full derivations with shapes annotated, under 25 minutes combined."
+        },
+        {
+          "id": "A3",
+          "topic": "Probability I — the objects themselves",
+          "subtopics": [
+            "sample space, events, axioms; conditioning and Bayes (your strength — keep it)",
+            "random variable as a FUNCTION on outcomes — not 'a probability' (probe 3 repair)",
+            "the type system: RV vs distribution vs density vs probability — four different objects",
+            "PMF/PDF/CDF; why a density can exceed 1 but never go negative (probe 6 repair)",
+            "law of total probability; independence"
+          ],
+          "resources": [
+            "Blitzstein & Hwang, Introduction to Probability, ch 1-3, 5",
+            "Harvard Stat 110 lectures paired to those chapters"
+          ],
+          "deadline": "2026-08-02",
+          "code_proof": "Simulate a 2-coin sample space explicitly as outcomes; implement an RV as a literal Python function on outcomes; recover its distribution by counting; plot a Beta(0.5,0.5) density and mark where it exceeds 1.",
+          "reconstruction_gate": "Closed book: probe 3 retaken — define RV formally, explain E[X] for continuous X as a weighted average (meaning, not formula), and give the four-object type table from memory."
+        },
+        {
+          "id": "A4",
+          "topic": "Expectation, properly",
+          "subtopics": [
+            "expectation as probability-weighted average; LOTUS",
+            "linearity of expectation (and why it needs no independence)",
+            "variance, covariance intro",
+            "indicator-variable trick",
+            "an RV whose expectation does not exist (Cauchy / St. Petersburg) — and what diverging Monte Carlo looks like"
+          ],
+          "resources": [
+            "Blitzstein & Hwang ch 4 + expectation sections of ch 5-6",
+            "Stat 110 corresponding lectures"
+          ],
+          "deadline": "2026-08-09",
+          "code_proof": "Monte Carlo E[g(X)] for a nonlinear g two ways (sampling vs numeric integral) and show agreement; simulate Cauchy sample means at n = 10^2..10^6 and show non-convergence; verify Jensen's inequality numerically for a convex g.",
+          "reconstruction_gate": "Closed book: state and prove linearity of expectation for the discrete case; explain in one paragraph why E[f(X)] != f(E[X]) in general and name the inequality that governs the convex case."
+        },
+        {
+          "id": "A5",
+          "topic": "MILESTONE — MNIST training loop from a blank file",
+          "subtopics": [
+            "Dataset/DataLoader, transform, batching",
+            "model definition, forward",
+            "cross-entropy loss, backward, optimizer step",
+            "train/eval split discipline, accuracy reporting"
+          ],
+          "resources": ["None. That is the point. No reference, no AI, no video."],
+          "deadline": "2026-08-09",
+          "code_proof": "A working MNIST classifier written cold from an empty file, >95% test accuracy, plus a one-paragraph note on every place you got stuck and how you got out.",
+          "reconstruction_gate": "The artifact IS the gate. Converts 'PyTorch' on the resume from claim to fact."
+        }
+      ],
+      "exit_exam": "Closed book, on paper, timed: diagnostic probes 1, 2, 3, 5 — the four you failed on July 12. Beating your own diagnostic is the proof of motion. Send the wreckage either way."
+    },
+    {
+      "id": "B",
+      "name": "Collision phase — semester running",
+      "window": "2026-08-10 to 2026-09-14",
+      "note": "Volume drops by design, not surrender. The 14:00-16:30 block survives everything; GSoC in the morning; classes get the remainder. Decode rep (20 min, 4x/week) starts here.",
+      "tickets": [
+        {
+          "id": "B1",
+          "topic": "Probability II — joint structure and conditioning",
+          "subtopics": [
+            "joint, marginal, conditional distributions",
+            "covariance and correlation; what correlation does NOT tell you",
+            "conditional expectation as a random variable; tower property",
+            "multivariate Gaussian: reading Sigma geometrically"
+          ],
+          "resources": ["Blitzstein & Hwang ch 7-9", "Stat 110 corresponding lectures"],
+          "deadline": "2026-08-23",
+          "code_proof": "Sample correlated Gaussians via Cholesky; verify tower property numerically on a hierarchical model; plot conditional distributions of a 2D Gaussian and show how the conditional mean is a linear function.",
+          "reconstruction_gate": "Closed book: derive the tower property; explain 'conditional expectation is a random variable' to a rubber duck with a concrete two-stage example."
+        },
+        {
+          "id": "B2",
+          "topic": "Information theory — the ML dialect",
+          "subtopics": [
+            "entropy; cross-entropy as THE classification loss (connect to A5's loss line)",
+            "KL divergence: definition, asymmetry, KL >= 0 via Jensen",
+            "absolute continuity: exactly when KL is infinite (probe 6, answered properly this time)",
+            "mutual information, first pass"
+          ],
+          "resources": ["Cover & Thomas ch 2", "MacKay ITILA ch 1-2 for intuition"],
+          "deadline": "2026-09-06",
+          "code_proof": "Compute KL between two Gaussians in closed form AND by Monte Carlo, show agreement; construct p, q where KL(p||q) is finite but KL(q||p) diverges, demonstrate numerically; implement cross-entropy from raw logits and match torch.nn.functional to 1e-6.",
+          "reconstruction_gate": "Closed book: prove KL >= 0; state the absolute-continuity condition and give the concrete infinite-KL example; explain KL asymmetry with the mode-seeking vs mass-covering picture."
+        },
+        {
+          "id": "B3",
+          "topic": "Matrix calculus consolidation week",
+          "subtopics": [
+            "every gradient in a 2-layer network derived by hand, end to end",
+            "backprop as the vector chain rule organized efficiently — nothing more"
+          ],
+          "resources": ["Your own A2 notes. No new material."],
+          "deadline": "2026-08-30",
+          "code_proof": "NumPy-only 2-layer network on a toy dataset: forward and manual backward from your derivations, gradients matched against finite differences AND against a PyTorch autograd twin.",
+          "reconstruction_gate": "Closed book: full backward pass derivation for the 2-layer net, shapes annotated, one sitting."
+        },
+        {
+          "id": "B4",
+          "topic": "MILESTONE — micrograd rebuilt solo",
+          "subtopics": [
+            "Value node with grad; backward closures; topological sort; broadcasting-free scalar autograd",
+            "the right-sized answer to the 'how does PyTorch work' itch — 10-414 stays banned"
+          ],
+          "resources": ["None during the build. You typed along with Karpathy once; producing it cold is the ownership version."],
+          "deadline": "2026-09-13",
+          "code_proof": "From a blank file, no reference: scalar autograd engine + tiny MLP that learns XOR. Then and only then, diff against Karpathy's repo and write 5 lines on what you structured differently and why.",
+          "reconstruction_gate": "The artifact is the gate. 2-3 sessions maximum — if it is eating more, stop and report, do not grind silently."
+        },
+        {
+          "id": "B5",
+          "topic": "TASTE TRIAL — training arm (opens Sep 1)",
+          "subtopics": [
+            "Moving MNIST next-frame prediction: a genuine tiny world model on a 1650",
+            "sequence Dataset/DataLoader (research-infrastructure skill, learned by necessity)",
+            "loss-curve reading; divergence diagnosis discipline (logic bug vs hyperparameter, hypothesis written before touching anything)",
+            "checkpointing and a clean eval script"
+          ],
+          "resources": [
+            "Moving MNIST dataset (public)",
+            "PyTorch docs as reference (reference use is legal; generation is yours)"
+          ],
+          "deadline": "2026-09-14 for first end-to-end run; trial continues into Phase C",
+          "code_proof": "A conv encoder-decoder (or ConvLSTM if it earns its complexity) predicting frame t+1 from context frames, trained locally or on Kaggle overflow, with saved checkpoints, a loss curve, and a 5-line training log per run including the pre-edit divergence hypothesis where applicable.",
+          "reconstruction_gate": "Daily tastelog line (drift/dread/one-liner) from Sep 1 onward — the log IS the deliverable; enjoyment is not the metric, voluntary return is."
+        }
+      ],
+      "exit_exam": "B2 and B3 reconstruction gates passed; MNIST milestone artifact exists; tastelog has >= 14 consecutive daily entries."
+    },
+    {
+      "id": "C",
+      "name": "Convergence — trial, scouting, first solo paper",
+      "window": "2026-09-15 to 2026-10-15",
+      "note": "Theory drops to maintenance (45 min/day). The month belongs to the trial arms, the pipeline, and the I-JEPA read.",
+      "tickets": [
+        {
+          "id": "C1",
+          "topic": "TASTE TRIAL — eval arm",
+          "subtopics": [
+            "fixed evaluation protocol: same data split, same metrics (MSE + one perceptual/structural metric), same context length, for every model",
+            "your B5 model vs one public implementation, compared honestly",
+            "one ablation each (e.g., context length, latent size) — the researcher's move installed as habit",
+            "error analysis: where do both fail, and differently?"
+          ],
+          "resources": ["One public Moving-MNIST prediction repo of your choosing (reading foreign research code is itself the skill)"],
+          "deadline": "2026-10-12",
+          "code_proof": "An evaluation harness (config-driven, seeded, deterministic eval) producing one comparison table + one ablation table, and an 800-word writeup with the tables. This artifact anchors every November cold email.",
+          "reconstruction_gate": "The writeup must contain at least one sentence of the form 'X did not matter, and here is the evidence' — a real ablation finding, not a summary."
+        },
+        {
+          "id": "C2",
+          "topic": "Professor scouting pipeline — operations",
+          "subtopics": [
+            "arxiv_scout runs Tue/Fri, 2 professors per session, from Sep 15",
+            "labs.csv human columns filled same session (hosts-visitors evidence, code-publishing, fit 1-5)",
+            "target: >= 18 scored rows by Oct 15, top-5 shortlist drafted"
+          ],
+          "resources": ["pipeline/arxiv_scout.py + labs.csv (already built)"],
+          "deadline": "2026-10-15",
+          "code_proof": "labs.csv with >= 18 fully-scored rows; a shortlist note naming top 5 labs with one sentence each on WHY (signal overlap, not prestige).",
+          "reconstruction_gate": "None — this is operations. The discipline is the twice-weekly cadence, not depth."
+        },
+        {
+          "id": "C3",
+          "topic": "MILESTONE — I-JEPA read solo, start to finish",
+          "subtopics": [
+            "full decode protocol per equation block: symbol table, types, plain sentence, instantiation, ancestor",
+            "no AI, no video, no blog explainers — first complete solo paper read of your life, timed for when the vocabulary exists",
+            "glossary rows appended per session"
+          ],
+          "resources": ["arXiv:2301.08243 (I-JEPA). Sessions of 45-60 min; expect 5-8 sessions; speed is not the metric."],
+          "deadline": "2026-10-10",
+          "code_proof": "Complete notation glossary for the paper; one 20-line NumPy instantiation of the core loss on toy tensors; a half-page 'what I could not resolve' list (an honest unresolved list is a PASS, a suspiciously empty one is a FAIL).",
+          "reconstruction_gate": "Closed book: write the I-JEPA objective from memory with every symbol typed, then explain aloud (recorded, 3 min) what is predicted, in what space, and why not pixel space."
+        },
+        {
+          "id": "C4",
+          "topic": "DECISION POINT — field choice, Oct 15",
+          "subtopics": [
+            "evidence: tastelog verdict (drift/dread/abort tallies), both trial artifacts, scouting shortlist",
+            "decision: training-flavored vs evaluation-flavored empirical work (or the fused identity if the evidence splits)",
+            "output: one paragraph naming the field + the Phase-3 niche module it selects + the 3 labs wave-1 outreach targets first"
+          ],
+          "resources": ["Your own logs. No external opinions. The decision is made from data, by you, in one sitting."],
+          "deadline": "2026-10-15",
+          "code_proof": "The decision paragraph, written and dated.",
+          "reconstruction_gate": "None. This ticket closes the 90 days and opens the outreach phase."
+        }
+      ],
+      "exit_exam": "C1 writeup exists, C3 glossary exists, C4 paragraph written. These three artifacts + labs.csv are the complete input to November."
+    }
+  ]
+}
