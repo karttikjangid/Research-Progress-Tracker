@@ -23,6 +23,8 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY prompts/ prompts/
 COPY week.yaml week.yaml
+# Read at runtime by /api/roadmap and /api/protocol (ROOT = /app).
+COPY roadmap.json Daily_protocol.json ./
 COPY litestream.yml entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 COPY --from=web /web/dist frontend/dist
