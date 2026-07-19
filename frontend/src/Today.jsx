@@ -16,6 +16,9 @@ const SESSION_KEY = 'gk_session'
 const CW = 372, GAP = 72
 const TOPS = [36, 2, 42], ROTS = [-3, 0, 2.4], ZS = [1, 3, 2]
 const FOCUS_TOP = 8
+// 0 for exhibits still awaiting a verdict, 1 for resolved — used to keep
+// actionable exhibits in the fan when there are more than three on file.
+const unresolvedFirst = (t) => (t.status === 'open' || t.status === 'failed_once' ? 0 : 1)
 
 export default function Today({ closed = false, streak, theme, onStreakChange }) {
   const [data, setData] = useState(null)
@@ -43,8 +46,17 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
     return () => ro.disconnect()
   }, [data])
 
-  const refresh = useCallback(() =>
-    get('/api/tasks').then((d) => { setData(d); setError('') }).catch((e) => setError(e.message)), [])
+  // Guard against out-of-order responses: a slow earlier GET /api/tasks must not
+  // overwrite state set by a later one (e.g. the mount fetch resolving after the
+  // post-create refetch — which made a freshly filed exhibit vanish until reload).
+  // Only the most recent request's result is applied.
+  const reqSeq = useRef(0)
+  const refresh = useCallback(() => {
+    const seq = ++reqSeq.current
+    return get('/api/tasks')
+      .then((d) => { if (seq === reqSeq.current) { setData(d); setError('') } })
+      .catch((e) => { if (seq === reqSeq.current) setError(e.message) })
+  }, [])
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { get('/api/history').then(setRecent).catch(() => setRecent([])) }, [])
 
@@ -90,17 +102,31 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
     post('/api/sessions/start', { kind: 'struggle_timer', planned_minutes: 20 })
       .then((sess) => storeSession({ ...sess, task_id: taskId }))
       .catch((e) => setError(e.message))
-  const endSession = () => {
+  const endSession = (task) => {
     if (!session) return
-    post(`/api/sessions/${session.id}/end`).then(() => { storeSession(null); onStreakChange?.() })
-      .catch((e) => { setError(e.message); storeSession(null) })
+    post(`/api/sessions/${session.id}/end`).then(() => {
+      storeSession(null)
+      onStreakChange?.()
+      // Ending a timed session on a gated exhibit hands it straight to the
+      // examiner: open the evidence flow so questions are asked and a verdict
+      // recorded. Skip if the exhibit is already resolved (passed / locked).
+      if (task && (task.status === 'open' || task.status === 'failed_once')) setGating(task)
+    }).catch((e) => { setError(e.message); storeSession(null) })
   }
   const completeTick = (id) =>
     post(`/api/tasks/${id}/complete`).then(refresh).catch((e) => setError(e.message))
 
   if (!data) return <p className="dk-req" style={{ marginTop: '28px' }}>{error || 'Loading the file…'}</p>
 
-  const gated = data.tasks.filter((t) => t.type === 'gated').slice(0, 3)
+  const gatedAll = data.tasks.filter((t) => t.type === 'gated')
+  // The fan has three slots. Normally there are at most three gated exhibits
+  // (the backend caps manual gated at 3/day), so filing order is preserved. When
+  // recall tasks push the count past three, order unresolved exhibits first so a
+  // freshly filed or spawned one is never silently hidden behind a resolved card.
+  const overflow = gatedAll.length > 3
+  const gated = (overflow
+    ? [...gatedAll].sort((a, b) => unresolvedFirst(a) - unresolvedFirst(b))
+    : gatedAll).slice(0, 3)
   const simple = data.tasks.filter((t) => t.type === 'simple')
   const elapsed = session ? Math.max(0, Math.floor((now - Date.parse(session.started_at)) / 1000)) : 0
 
@@ -135,7 +161,7 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
           <div><div className="s-lab">SESSION RUNNING</div><div className="dk-time mt8">{clock(elapsed)}</div></div>
           <div className="fx col gap8" style={{ alignItems: 'flex-end' }}>
             <span className="dk-sess">IN SESSION</span>
-            <button className="s-mini-btn dk-f" type="button" onClick={(e) => { e.stopPropagation(); endSession() }}>■ END</button>
+            <button className="s-mini-btn dk-f" type="button" onClick={(e) => { e.stopPropagation(); endSession(t) }}>■ END</button>
           </div>
         </div>
       )
@@ -237,6 +263,12 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
         </div>
       )}
 
+      {overflow && (
+        <div className="dk-req tc" style={{ marginTop: '12px' }}>
+          Showing three of {gatedAll.length} filed exhibits — unresolved ones first.
+        </div>
+      )}
+
       <TicksStrip ticks={buildTicks(simple, data.verbal, completeTick)} />
 
       <div className="dk-foot">SINGLE EXAMINER · EVIDENCE ONLY · VERDICTS BINDING — NO APPEALS, NO SCORES</div>
@@ -297,8 +329,6 @@ function buildTicks(simple, verbal, complete) {
 }
 
 // ---- ancillary record: wired features the export did not depict -----------
-const ARMS = ['none', 'training', 'eval']
-
 function Ancillary({ onChange }) {
   return (
     <div className="s-anc">
@@ -318,22 +348,27 @@ function FileItem({ onChange }) {
   const [title, setTitle] = useState('')
   const [type, setType] = useState('gated')
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const add = (e) => {
     e.preventDefault()
-    if (!title.trim()) return
-    post('/api/tasks', { title, type }).then(() => { setTitle(''); setErr(''); onChange?.() }).catch((er) => setErr(er.message))
+    if (!title.trim() || busy) return
+    setBusy(true); setErr('')
+    post('/api/tasks', { title, type })
+      .then(() => { setTitle(''); onChange?.() })
+      .catch((er) => setErr(er.message))
+      .finally(() => setBusy(false))
   }
   return (
     <form className="s-card" onSubmit={add}>
       <div className="s-lab">FILE A NEW ITEM</div>
       {err && <p className="s-err" style={{ margin: '8px 0' }}>{err}</p>}
       <div className="fx gap8" style={{ marginTop: '10px', alignItems: 'center' }}>
-        <input className="s-inp" style={{ flex: 1 }} value={title} placeholder="What must be done…" onChange={(e) => setTitle(e.target.value)} />
-        <select className="s-sel" value={type} onChange={(e) => setType(e.target.value)}>
+        <input className="s-inp" style={{ flex: 1 }} value={title} placeholder="What must be done…" disabled={busy} onChange={(e) => setTitle(e.target.value)} />
+        <select className="s-sel" value={type} disabled={busy} onChange={(e) => setType(e.target.value)}>
           <option value="gated">gated exhibit</option>
           <option value="simple">free tick</option>
         </select>
-        <button className="s-mini-btn" type="submit">FILE</button>
+        <button className="s-mini-btn" type="submit" disabled={busy || !title.trim()}>{busy ? 'FILING…' : 'FILE'}</button>
       </div>
       <div className="s-hint">Gated exhibits require evidence (up to 3/day); free ticks are self-certified.</div>
     </form>
@@ -344,11 +379,19 @@ function DueReviews({ onChange }) {
   const [due, setDue] = useState([])
   const [open, setOpen] = useState(null)
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const load = useCallback(() => get('/api/reviews/due').then(setDue).catch((e) => setErr(e.message)), [])
   useEffect(() => { load() }, [load])
 
   const reveal = (id) => post(`/api/reviews/${id}/reveal`).then((r) => setOpen({ id, ...r })).catch((e) => setErr(e.message))
-  const grade = (id, g) => post(`/api/reviews/${id}/grade`, { grade: g }).then(() => { setOpen(null); load(); onChange?.() }).catch((e) => setErr(e.message))
+  const grade = (id, g) => {
+    if (busy) return
+    setBusy(true); setErr('')
+    post(`/api/reviews/${id}/grade`, { grade: g })
+      .then(() => { setOpen(null); load(); onChange?.() })
+      .catch((e) => setErr(e.message))
+      .finally(() => setBusy(false))
+  }
 
   if (!due.length) return null
   return (
@@ -368,7 +411,7 @@ function DueReviews({ onChange }) {
                 <p className="fs12" style={{ margin: '8px 0 0', fontStyle: 'italic' }}>Q: {open.question}</p>
                 <div className="fx gap8" style={{ marginTop: '10px' }}>
                   {['recalled', 'partial', 'forgot'].map((g) => (
-                    <button key={g} className="s-mini-btn" type="button" onClick={() => grade(r.id, g)}>{g.toUpperCase()}</button>
+                    <button key={g} className="s-mini-btn" type="button" disabled={busy} onClick={() => grade(r.id, g)}>{g.toUpperCase()}</button>
                   ))}
                 </div>
               </div>
@@ -380,45 +423,64 @@ function DueReviews({ onChange }) {
   )
 }
 
+// End-of-day consolidation: one retrieval prompt (what you can explain now that
+// you couldn't this morning) + the day's hardest sticking point, which the
+// backend schedules as tomorrow's spaced-repetition review. Immutable once
+// written. Yesterday's line is surfaced as a light continuity/recall cue.
 function TasteLog() {
   const [existing, setExisting] = useState(undefined)
-  const [drift, setDrift] = useState('none')
-  const [dread, setDread] = useState('none')
-  const [line, setLine] = useState('')
+  const [yday, setYday] = useState(null)
+  const [understood, setUnderstood] = useState('')
+  const [stuck, setStuck] = useState('')
   const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   useEffect(() => { get('/api/tastelog').then(setExisting).catch(() => setExisting(null)) }, [])
+  useEffect(() => {
+    const d = new Date(); d.setDate(d.getDate() - 1)
+    get(`/api/tastelog?date=${d.toISOString().slice(0, 10)}`).then(setYday).catch(() => setYday(null))
+  }, [])
 
   const submit = (e) => {
     e.preventDefault()
-    post('/api/tastelog', { drift_arm: drift, dread_arm: dread, one_liner: line }).then(setExisting).catch((er) => setErr(er.message))
+    if (busy) return
+    setBusy(true); setErr('')
+    post('/api/tastelog', { understood, sticking_point: stuck })
+      .then(setExisting).catch((er) => setErr(er.message)).finally(() => setBusy(false))
   }
-  if (existing === undefined) return <div className="s-card"><div className="s-lab">TASTE LOG</div></div>
+  if (existing === undefined) return <div className="s-card"><div className="s-lab">END OF DAY · CONSOLIDATE</div></div>
+
+  const ydayLine = yday && (yday.understood || yday.one_liner)
   return (
     <div className="s-card">
-      <div className="s-lab">TASTE LOG · END OF DAY</div>
-      {existing ? (
-        <p className="fs13" style={{ marginTop: '10px', lineHeight: 1.6 }}>
-          drift→<span className="fw7">{existing.drift_arm}</span>, dread→<span className="fw7">{existing.dread_arm}</span>: {existing.one_liner}
-          <span className="s-hint" style={{ display: 'block' }}>written — immutable</span>
+      <div className="s-lab">END OF DAY · CONSOLIDATE</div>
+      {ydayLine && (
+        <p className="s-hint" style={{ marginTop: '10px', lineHeight: 1.5 }}>
+          Yesterday you understood: <span style={{ fontStyle: 'italic' }}>{ydayLine}</span>
         </p>
+      )}
+      {existing ? (
+        <div className="fs13" style={{ marginTop: '10px', lineHeight: 1.6 }}>
+          <p className="m0"><span className="fw7">Understood today:</span> {existing.understood || existing.one_liner || '—'}</p>
+          {existing.sticking_point && (
+            <p style={{ margin: '8px 0 0' }}>
+              <span className="fw7">Stuck on:</span> {existing.sticking_point}
+              <span className="s-hint"> — returns as a review tomorrow</span>
+            </p>
+          )}
+          <span className="s-hint" style={{ display: 'block', marginTop: '6px' }}>written — immutable</span>
+        </div>
       ) : (
         <form onSubmit={submit} style={{ marginTop: '10px' }}>
           {err && <p className="s-err" style={{ margin: '0 0 8px' }}>{err}</p>}
-          <div className="fx gap8" style={{ alignItems: 'center' }}>
-            <label className="fs12">drift
-              <select className="s-sel" style={{ marginLeft: '6px' }} value={drift} onChange={(e) => setDrift(e.target.value)}>
-                {ARMS.map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </label>
-            <label className="fs12">dread
-              <select className="s-sel" style={{ marginLeft: '6px' }} value={dread} onChange={(e) => setDread(e.target.value)}>
-                {ARMS.map((a) => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </label>
-          </div>
-          <input className="s-inp mt12" value={line} onChange={(e) => setLine(e.target.value)}
-            placeholder="One line (20–200 chars): what today's evidence actually was" />
-          <div style={{ marginTop: '12px' }}><button className="s-mini-btn" type="submit">WRITE (FINAL)</button></div>
+          <label className="fs12">What do you understand now that you couldn't this morning?</label>
+          <textarea className="s-ta mt8" rows={3} value={understood} onChange={(e) => setUnderstood(e.target.value)}
+            placeholder="The day's real consolidation, in your own words (10–500 chars). An honest 'nothing clicked' is valid data." />
+          <label className="fs12" style={{ display: 'block', marginTop: '12px' }}>
+            Today's hardest sticking point <span className="s-hint">— becomes tomorrow's review (optional)</span>
+          </label>
+          <textarea className="s-ta mt8" rows={3} value={stuck} onChange={(e) => setStuck(e.target.value)}
+            placeholder="The one thing that blocked you. Leave empty if nothing stuck." />
+          <div style={{ marginTop: '12px' }}><button className="s-mini-btn" type="submit" disabled={busy}>{busy ? 'WRITING…' : 'WRITE (FINAL)'}</button></div>
         </form>
       )}
     </div>

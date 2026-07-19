@@ -31,3 +31,24 @@ export function mmss(sec) {
   const s = Math.max(0, Math.floor(sec))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
+
+// Whole days from today (local) to an ISO YYYY-MM-DD. Negative = past due.
+// Both ends pinned to local noon so DST/timezone never shifts the day count.
+export function daysUntil(iso) {
+  if (!iso) return null
+  const target = new Date(`${iso}T12:00:00`)
+  if (Number.isNaN(target.getTime())) return null
+  const now = new Date()
+  const noonToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12)
+  return Math.round((target - noonToday) / 86400000)
+}
+
+// "due in 6 days" / "due tomorrow" / "due today" / "3 days overdue"
+export function dueLabel(iso) {
+  const d = daysUntil(iso)
+  if (d == null) return ''
+  if (d === 0) return 'due today'
+  if (d === 1) return 'due tomorrow'
+  if (d === -1) return '1 day overdue'
+  return d > 0 ? `due in ${d} days` : `${-d} days overdue`
+}

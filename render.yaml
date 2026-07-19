@@ -1,30 +1,35 @@
-# Render Blueprint for Sentinel — one Docker web service that runs the FastAPI
-# backend and serves the built frontend, with a persistent disk for SQLite +
-# audio + the whisper model cache.
+# Render Blueprint for Sentinel — a single free Docker web service.
+# No persistent disk is needed: Litestream restores the SQLite DB from Supabase
+# on boot and replicates changes back, so an ephemeral free instance is fine.
 #
-# In the Render dashboard: New + → Blueprint → connect this repo. It creates the
-# service and disk from this file; then set the two secret env vars
-# (GATEKEEPER_PASSWORD, NVIDIA_API_KEY) under the service's Environment tab.
+# You can also create this by hand (New + → Web Service → pick this repo →
+# Runtime: Docker → Instance type: Free) and set the same env vars in the
+# dashboard — that path is the most reliable for the free tier.
 services:
   - type: web
     name: sentinel
     runtime: docker
     dockerfilePath: ./Dockerfile
-    plan: standard          # >= 2 GB RAM — the free/starter 512 MB tier will OOM on whisper
+    plan: free
     healthCheckPath: /healthz
     autoDeploy: true
-    disk:
-      name: sentinel-data
-      mountPath: /data
-      sizeGB: 5
     envVars:
-      - key: GATEKEEPER_STATE   # DB, audio, backups, logs live on the disk
+      - key: GATEKEEPER_STATE
         value: /data
-      - key: HF_HOME            # whisper model cached on the disk (survives restarts)
-        value: /data/hf
+      - key: SUPABASE_S3_BUCKET
+        value: Sentinel
+      - key: SUPABASE_S3_REGION
+        value: ap-southeast-1
       - key: EVAL_MODEL
         value: meta/llama-3.1-70b-instruct
-      - key: GATEKEEPER_PASSWORD  # set in the dashboard — your single shared password
+      # secrets — set these in the dashboard (never committed)
+      - key: GATEKEEPER_PASSWORD
         sync: false
-      - key: NVIDIA_API_KEY       # set in the dashboard — your NIM key
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: SUPABASE_S3_ENDPOINT
+        sync: false
+      - key: LITESTREAM_ACCESS_KEY_ID
+        sync: false
+      - key: LITESTREAM_SECRET_ACCESS_KEY
         sync: false

@@ -5,10 +5,12 @@ import { headerDate } from './format'
 import Today from './Today'
 import Record from './Record'
 import History from './History'
+import Roadmap from './Roadmap'
+import Protocol from './Protocol'
 import CloseFileModal from './components/CloseFileModal'
 
-const SCREENS = { today: Today, record: Record, history: History }
-const TABS = [['today', 'TODAY'], ['record', 'RECORD'], ['history', 'HISTORY']]
+const SCREENS = { today: Today, record: Record, history: History, roadmap: Roadmap, protocol: Protocol }
+const TABS = [['today', 'TODAY'], ['record', 'RECORD'], ['history', 'HISTORY'], ['roadmap', 'ROADMAP'], ['protocol', 'PROTOCOL']]
 
 // PHASE 2 — the Evidence File shell, wired. Week theme and streak come from the
 // backend; CLOSE THE FILE runs the real day-close. The wordmark keeps the

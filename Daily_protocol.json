@@ -1,0 +1,125 @@
+{
+  "system_name": "Daily Operating Protocol — Complete (v1, simplified)",
+  "version": 1,
+  "motto": "Track inputs, not outcomes. The routine isn't secret; the streak is.",
+  "success_bar": "Hitting 70% of days = the system is working. Perfection is not the target.",
+
+  "non_negotiables": [
+    {
+      "id": "nn1",
+      "title": "Wake at 7:00 AM, every day, by alarm",
+      "explanation": "Not roommate-driven, not motivation-driven. Weekends included (±30 min max). Your 6:30-9:00 wake swing is a rolling mini-jetlag causing most of your grogginess and fog. Fixing the wake time fixes sleep time automatically."
+    },
+    {
+      "id": "nn2",
+      "title": "10-15 min outdoor light within 1 hour of waking",
+      "explanation": "Walk, terrace, anything outside. This sets your body clock so you actually feel sleepy at 11 PM instead of 2 AM. At home this means stepping out before evening; in hostel the college walk counts if it's early enough."
+    },
+    {
+      "id": "nn3",
+      "title": "Screens off 30 min before bed — paper only",
+      "explanation": "Your current pattern is laptop → sleep with zero gap. Last block of the night goes to physical books or notebook (math problems on paper count). This fixes wind-down AND feeds your study roadmap at the same time."
+    },
+    {
+      "id": "nn4",
+      "title": "Phone in another room during every deep-work block",
+      "explanation": "Your specific failure: checking the phone while waiting for AI responses. The fix is physical distance, not willpower. Phone lives outside the room during blocks, full stop."
+    },
+    {
+      "id": "nn5",
+      "title": "One 2-hour GSoC block, 6 days a week",
+      "explanation": "12 h/week — inside your 10-15 h target. Makes output a daily default instead of a deadline panic sprint. Same slot every day so it stops being a decision."
+    }
+  ],
+
+  "daily_schedule": [
+    { "time": "07:00", "block": "Wake + water + 10-15 min outside", "note": "Alarm, not roommates. No feeds for first 30 min." },
+    { "time": "07:30", "block": "Breakfast", "note": "Non-optional on training days. Eggs / curd + fruit + nuts is enough. One black coffee here is fine." },
+    { "time": "09:00", "block": "GSoC deep block (2h)", "note": "Phone outside room. While AI generates, eyes stay on the problem — predict the answer." },
+    { "time": "11:15", "block": "Math/study deep block (90 min)", "note": "First 15 min: Anki review of atomic facts. Attempt problems cold before reading. End with 5-min blank-page recall." },
+    { "time": "13:00", "block": "Lunch + Stress SPF (10 min)", "note": "After eating: 10 min breath-focus sitting or NSDR track. Boring on purpose. Every 'return to breath' is a focus rep." },
+    { "time": "16:00", "block": "Training slot (1-2h)", "note": "Per weekly template below. Easy run = conversational pace — full sentences possible." },
+    { "time": "19:00", "block": "Second study block OR free", "note": "Optional. If used, same rules: phone out, recall at the end." },
+    { "time": "20:30", "block": "Empty walk (15-20 min)", "note": "No phone, no podcast, no music. Consolidation + boredom training. Not wasted time." },
+    { "time": "22:45", "block": "Screens off — paper reading", "note": "Physical book or paper problems until lights out." },
+    { "time": "23:15", "block": "Lights out", "note": "Target 23:15-23:30. ~7.5h before the 7:00 alarm." }
+  ],
+
+  "daily_mind_habits": [
+    {
+      "id": "recall",
+      "title": "Blank-page recall",
+      "when": "End of every study block + 2 min each morning recalling yesterday",
+      "explanation": "Pulling info OUT of your head builds memory; re-reading doesn't. The struggle to remember is the mechanism. Also exposes the gap between 'felt like I learned it' and 'actually know it'."
+    },
+    {
+      "id": "hard_novelty",
+      "title": "One block at genuine difficulty",
+      "when": "Morning blocks",
+      "explanation": "The brain adapts to strain, like muscle to the last hard rep. Confusion during a hard problem IS the treatment working. If the session felt smooth, assume you learned less than it felt like."
+    },
+    {
+      "id": "ai_guardrail",
+      "title": "AI as tutor, never answer machine",
+      "when": "Every AI session",
+      "explanation": "Rules: (1) 10 genuine minutes attempting it yourself first, (2) ask for hints and critique, never solutions, (3) after AI helps, close the chat and reproduce it alone. Research: answer-machine AI users scored 17% WORSE on real exams than students with no AI — while feeling like they learned fine."
+    },
+    {
+      "id": "dopamine_hygiene",
+      "title": "Feed hygiene",
+      "when": "All day",
+      "explanation": "YouTube app uninstalled, browser-only with Shorts blocked (Unhook extension). No feeds in first 30 min of the day. Breaks between blocks are 10 min of BORING — walk, water, window. Stimulating breaks make re-entering work harder."
+    },
+    {
+      "id": "no_long_naps",
+      "title": "Naps: 20-30 min max, before 4 PM",
+      "when": "Only if needed",
+      "explanation": "Your 2-hour noon naps steal pressure from night sleep and shift your whole rhythm. If training wrecks you that badly, the training intensity is the problem, not the nap."
+    }
+  ],
+
+  "weekly": [
+    {
+      "id": "training_template",
+      "title": "Training week: 3× gym, 1-2× badminton, 1× easy run, 1× full rest",
+      "explanation": "One activity per day, but by plan not mood. Gym: log every lift every session; progress = weight or reps up every 1-2 weeks. Easy run at conversational pace brings resting HR down. Rest day = walking only — that's where adaptation happens. Right now everything is medium-hard so you never fully recover."
+    },
+    {
+      "id": "sunday_review",
+      "title": "Sunday review — 20 min, on paper",
+      "explanation": "Count the week's deep-work blocks and training sessions, find the single biggest leak, change ONE thing. Weekly and on paper because apps didn't stick for you. This is what dissolves the ambition-action stress: visible evidence of process."
+    },
+    {
+      "id": "feynman_page",
+      "title": "One-page Feynman write-up, from memory",
+      "explanation": "Every Sunday: explain the hardest thing you learned this week in plain words, no references open. Exposes hollow understanding instantly. Doubles as raw material for the ThinkSwiss application over 6 months."
+    },
+    {
+      "id": "talk_upward",
+      "title": "At least one sharp question to mentors",
+      "explanation": "Ask David/Javier real technical questions, share half-finished thinking. Explaining and defending ideas to humans is cognitively demanding in ways solo study isn't. Asking sharp questions is how you look senior, not junior."
+    },
+    {
+      "id": "rhr_check",
+      "title": "Resting heart rate — Sunday morning before getting up",
+      "explanation": "Currently 78. If the sleep + polarized training system works, expect a drift toward low 70s over ~8 weeks. If it climbs for 2+ weeks, you're under-recovering — add rest."
+    }
+  ],
+
+  "nutrition_rules": [
+    { "rule": "Breakfast non-optional on training days", "explanation": "Skipping breakfast 3x/week while training daily and taking creatine works against yourself. 5-minute version is fine." },
+    { "rule": "Protein anchor at every meal", "explanation": "Eggs, dal, paneer, curd, soy chunks (cheapest protein per rupee), whey if budget allows. Target ~1.6 g per kg bodyweight per day." },
+    { "rule": "Creatine 3-4 g daily, any time", "explanation": "Keep it. Consistency beats timing. Stay at the top of your 2-3 L water range." },
+    { "rule": "Caffeine: nothing after 2 PM", "explanation": "Your one morning black coffee is genuinely good — keep exactly that." },
+    { "rule": "At home: one sweet portion per day, don't ban", "explanation": "Banning sweets at a family table is an unwinnable fight. Portion rule + protein at every meal + daily training slot is enough. Two weeks of weight fluctuation is noise — don't let it become a stress input." },
+    { "rule": "One-time: vitamin D + B12 blood test", "explanation": "~₹1,000-1,500 at any lab. You've never tested; deficiency in both is extremely common and directly hits energy, mood, and focus. If low, discuss supplements with a doctor — don't guess." }
+  ],
+
+  "scorecard": [
+    { "metric": "Wake at 7:00 (±30 min)", "target": "6/7 days" },
+    { "metric": "Deep-work blocks (90 min)", "target": "15+/week" },
+    { "metric": "Training sessions per template", "target": "5-6/week" },
+    { "metric": "Screen-free wind-down", "target": "5/7 nights" },
+    { "metric": "Resting HR (Sunday AM)", "target": "Trending down over 8 weeks" }
+  ]
+}

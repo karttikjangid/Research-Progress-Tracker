@@ -186,6 +186,10 @@ class Recording(Base):
     fillers_per_min: Mapped[float | None] = mapped_column(Float, default=None)
     unique_ratio: Mapped[float | None] = mapped_column(Float, default=None)
     longest_silence_sec: Mapped[float | None] = mapped_column(Float, default=None)
+    # Durable copies of the transcript/audit (the on-disk files don't survive an
+    # ephemeral-disk restart; the DB, replicated by Litestream, does).
+    transcript_text: Mapped[str] = mapped_column(Text, default="")
+    audit_text: Mapped[str] = mapped_column(Text, default="")
 
     @validates("audit_viewed")
     def _v_viewed(self, _k, new):
@@ -311,15 +315,24 @@ class WorkSession(Base):
 
 
 class TasteLog(Base):
-    """One immutable end-of-day judgment row per date (existing immutability
-    pattern: fields freeze once written; a second POST for the date is a 409)."""
+    """One immutable end-of-day reflection row per date (existing immutability
+    pattern: fields freeze once written; a second POST for the date is a 409).
+
+    `understood` (what you can explain now that you couldn't this morning) and
+    `sticking_point` (the day's hardest snag, scheduled as tomorrow's review) are
+    the live fields. `drift_arm`/`dread_arm`/`one_liner` are the retired drift/
+    dread self-experiment — kept nullable-by-default so historical rows and the
+    /api/tastelog/verdict tally survive, but no longer written by the UI."""
     __tablename__ = "tastelog"
     date: Mapped[str] = mapped_column(String, primary_key=True)
-    drift_arm: Mapped[str] = mapped_column(String)   # training | eval | none
-    dread_arm: Mapped[str] = mapped_column(String)   # training | eval | none
-    one_liner: Mapped[str] = mapped_column(Text)
+    understood: Mapped[str] = mapped_column(Text, default="")
+    sticking_point: Mapped[str] = mapped_column(Text, default="")
+    # retired experiment — default "" so new rows need not supply them
+    drift_arm: Mapped[str] = mapped_column(String, default="")   # training | eval | none
+    dread_arm: Mapped[str] = mapped_column(String, default="")   # training | eval | none
+    one_liner: Mapped[str] = mapped_column(Text, default="")
 
-    @validates("drift_arm", "dread_arm", "one_liner")
+    @validates("understood", "sticking_point", "drift_arm", "dread_arm", "one_liner")
     def _immutable(self, key, new):
         old = getattr(self, key)
         if old and new != old:
@@ -328,7 +341,8 @@ class TasteLog(Base):
 
     def as_dict(self):
         return {c: getattr(self, c) for c in
-                ("date", "drift_arm", "dread_arm", "one_liner")}
+                ("date", "understood", "sticking_point",
+                 "drift_arm", "dread_arm", "one_liner")}
 
 
 class DayLog(Base):

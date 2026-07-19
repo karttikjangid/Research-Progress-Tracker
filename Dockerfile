@@ -10,21 +10,24 @@ RUN npm run build
 
 # ---- stage 2: backend runtime (also serves the built frontend) ----
 FROM python:3.11-slim
-# ffmpeg/ffprobe are required by the transcription pipeline
+# ffmpeg/ffprobe: transcription pipeline. curl: fetch litestream.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get install -y --no-install-recommends ffmpeg curl \
  && rm -rf /var/lib/apt/lists/*
+# Litestream: continuous SQLite replication to Supabase Storage.
+RUN curl -sSL https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz \
+    | tar -xz -C /usr/local/bin litestream
 WORKDIR /app
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ backend/
 COPY prompts/ prompts/
 COPY week.yaml week.yaml
+COPY litestream.yml entrypoint.sh ./
+RUN chmod +x entrypoint.sh
 COPY --from=web /web/dist frontend/dist
 ENV SENTINEL_STATIC=/app/frontend/dist \
-    HF_HOME=/data/hf \
     PYTHONUNBUFFERED=1
-WORKDIR /app/backend
-EXPOSE 8000
-# Render provides $PORT; default to 8000 locally.
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+EXPOSE 7860
+# entrypoint restores the DB from Supabase then runs the app under Litestream.
+CMD ["/app/entrypoint.sh"]
