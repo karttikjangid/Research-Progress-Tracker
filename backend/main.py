@@ -487,10 +487,38 @@ def grade_review(rev_id: int, body: GradeIn, s=Depends(db)):
 # BEFORE transcription. A crash at any later point leaves a row that
 # POST /api/recordings/{id}/retry can finish. No code path deletes a recording.
 
+def _recording_dict(r: Recording) -> dict:
+    """Recording row -> API shape, shared by /api/history and GET
+    /api/recordings/{id}. audit_text is durable (DB column, populated by
+    _process below) for any row processed after migration 017; the on-disk
+    .audit.md file is only a fallback for older rows."""
+    d = r.as_dict()
+    d["transcript"] = r.transcript_text
+    d["audit"] = r.audit_text
+    if not d["audit"]:
+        try:
+            d["audit"] = Path(r.audit_path).read_text()
+        except OSError:
+            d["audit"] = "(audit file missing)"
+    return d
+
+
 def _process(r: Recording, s) -> dict:
-    """Transcribe + audit whatever is still missing, then mark done."""
+    """Transcribe + audit whatever is still missing, then mark done.
+
+    r.transcript_text/r.audit_text (SQLite columns, replicated to Supabase by
+    Litestream) are the durability boundary and the source of truth for what's
+    already done — NOT the .txt/.md files under DATA_DIR, which live only on
+    the current container's local disk and do not survive a restart on
+    Render's ephemeral free tier. Each DB column is written and committed
+    immediately after its step succeeds (not batched at the end) so a restart
+    between steps can't silently lose already-completed work: a later retry
+    picks up from whichever text columns are already populated. The on-disk
+    .txt/.md files are still written as a local convenience but nothing here
+    depends on them existing.
+    """
     tp, ap = Path(r.transcript_path), Path(r.audit_path)
-    if not tp.exists():
+    if not r.transcript_text:
         try:
             text = transcribe.transcribe(r.audio_path)
         except Exception:
@@ -498,16 +526,20 @@ def _process(r: Recording, s) -> dict:
             s.commit()
             infra.log.exception("recording %s: transcription failed", r.id)
             raise HTTPException(500, "transcription failed — "
-                                f"POST /api/recordings/{r.id}/retry to re-run")
+                                f"POST /api/recordings/{r.id}/retry to re-run",
+                                headers={"X-Recording-Id": str(r.id)})
         if not text:
             r.status = "transcription_failed"
             s.commit()
             raise HTTPException(400, "transcript came back empty — no speech "
-                                f"detected; retry with /api/recordings/{r.id}/retry")
+                                f"detected; retry with /api/recordings/{r.id}/retry",
+                                headers={"X-Recording-Id": str(r.id)})
         tp.write_text(text)
-    if not ap.exists():
+        r.transcript_text = text
+        s.commit()
+    if not r.audit_text:
         if r.wpm is None:  # deterministic stats before the LLM, survive retries
-            st = transcribe.compute_stats(tp.read_text(), r.duration_sec)
+            st = transcribe.compute_stats(r.transcript_text, r.duration_sec)
             r.wpm, r.fillers_per_min = st["wpm"], st["fillers_per_min"]
             r.unique_ratio = st["unique_ratio"]
             r.longest_silence_sec = st["longest_silence_sec"]
@@ -517,23 +549,21 @@ def _process(r: Recording, s) -> dict:
                  "longest_silence_sec": r.longest_silence_sec}
         ledger = [f"'{v.term_used}' used for '{v.term_meant}' ({v.date})"
                   for v in s.query(VocabFlag).order_by(VocabFlag.id.desc()).limit(20)]
-        glossary = _glossary_lines(_glossary_matches(s, tp.read_text(), 10))
+        glossary = _glossary_lines(_glossary_matches(s, r.transcript_text, 10))
         try:
-            audit = llm.audit_transcript(tp.read_text(), stats=stats, ledger=ledger,
+            audit = llm.audit_transcript(r.transcript_text, stats=stats, ledger=ledger,
                                          glossary=glossary)
         except llm.LLMError as e:
             r.status = "audit_failed"
             s.commit()
             infra.log.error("recording %s: audit failed: %s", r.id, e)
-            raise HTTPException(503, f"{e} — POST /api/recordings/{r.id}/retry")
+            raise HTTPException(503, f"{e} — POST /api/recordings/{r.id}/retry",
+                                headers={"X-Recording-Id": str(r.id)})
         ap.write_text(audit)
-    # Store the text in the DB too, so the record survives an ephemeral-disk
-    # restart (Litestream replicates the DB; the files on disk are not).
-    r.transcript_text = tp.read_text()
-    r.audit_text = ap.read_text()
+        r.audit_text = audit
     r.status = "done"
     s.commit()
-    return {**r.as_dict(), "audit": r.audit_text, "transcript": r.transcript_text}
+    return _recording_dict(r)
 
 
 @app.post("/api/recordings", status_code=201)
@@ -564,6 +594,17 @@ def upload_recording(file: UploadFile, s=Depends(db)):
     s.commit()
     infra.log.info("recording %s uploaded: %ss at %s", r.id, int(duration), audio_path)
     return _process(r, s)
+
+
+@app.get("/api/recordings/{rec_id}")
+def get_recording(rec_id: int, s=Depends(db)):
+    """Point lookup by id — lets a client that already knows the id (e.g. from
+    the X-Recording-Id header on a failed upload/retry) recover a single
+    recording without refetching all of /api/history."""
+    r = s.get(Recording, rec_id)
+    if not r:
+        raise HTTPException(404, "no such recording")
+    return _recording_dict(r)
 
 
 @app.post("/api/recordings/{rec_id}/retry")
@@ -1196,14 +1237,7 @@ def history(s=Depends(db)):
     for date in dates:
         recs = []
         for r in s.query(Recording).filter(Recording.date == date).order_by(Recording.id):
-            d = r.as_dict()
-            d["audit"] = r.audit_text  # durable copy; fall back to the file for pre-017 rows
-            if not d["audit"]:
-                try:
-                    d["audit"] = Path(r.audit_path).read_text()
-                except OSError:
-                    d["audit"] = "(audit file missing)"
-            recs.append(d)
+            recs.append(_recording_dict(r))
         log = s.get(DayLog, date)
         try:  # per-day focus minutes from completed, non-aborted work sessions
             _sess = s.query(WorkSession).filter(WorkSession.date == date).all()

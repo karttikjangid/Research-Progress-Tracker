@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import sqlite3
+import sys
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -33,8 +34,10 @@ if not log.handlers:
     # handler above writes to STATE_ROOT/logs, which on the free plan is
     # ephemeral disk that isn't shown anywhere. Without this, every log.error /
     # log.exception call (e.g. "recording N: audit failed: ...") is invisible
-    # in the hosting dashboard.
-    _sh = logging.StreamHandler()
+    # in the hosting dashboard. Explicit stdout, not StreamHandler()'s stderr
+    # default — most log dashboards (Render included) flag stderr lines as
+    # errors, which would paint every plain log.info() red.
+    _sh = logging.StreamHandler(sys.stdout)
     _sh.setFormatter(_fmt)
     log.addHandler(_sh)
     log.setLevel(logging.INFO)

@@ -32,6 +32,19 @@ export function mmss(sec) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
 
+// ISO-8601 week number for a YYYY-MM-DD date (parsed as local noon to avoid
+// TZ drift). Week 1 is the week containing the year's first Thursday.
+export function isoWeekNumber(iso) {
+  if (!iso) return null
+  const d = new Date(`${iso}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return null
+  const thursday = new Date(d)
+  thursday.setDate(d.getDate() - ((d.getDay() + 6) % 7) + 3)
+  const firstThursday = new Date(thursday.getFullYear(), 0, 4)
+  firstThursday.setDate(firstThursday.getDate() - ((firstThursday.getDay() + 6) % 7) + 3)
+  return 1 + Math.round((thursday - firstThursday) / (7 * 86400000))
+}
+
 // Whole days from today (local) to an ISO YYYY-MM-DD. Negative = past due.
 // Both ends pinned to local noon so DST/timezone never shifts the day count.
 export function daysUntil(iso) {

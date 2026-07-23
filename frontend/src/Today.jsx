@@ -20,7 +20,7 @@ const FOCUS_TOP = 8
 // actionable exhibits in the fan when there are more than three on file.
 const unresolvedFirst = (t) => (t.status === 'open' || t.status === 'failed_once' ? 0 : 1)
 
-export default function Today({ closed = false, streak, theme, onStreakChange }) {
+export default function Today({ closed = false, streak, theme, weekLabel, onStreakChange }) {
   const [data, setData] = useState(null)
   const [recent, setRecent] = useState([])
   const [error, setError] = useState('')
@@ -216,7 +216,7 @@ export default function Today({ closed = false, streak, theme, onStreakChange })
           day={closed ? 0 : (streak?.current_streak ?? '—')}
           note={closed ? 'BROKEN — RESETS AT 00:00' : streak ? `STREAK INTACT · LONGEST ${streak.longest_streak}` : 'STREAK'} />
         <SevenDayMarks days={buildLast7(recent)} />
-        <ThemeStrip theme={theme || '—'} />
+        <ThemeStrip theme={theme || '—'} label={weekLabel} />
       </div>
 
       {gated.length === 0 ? (

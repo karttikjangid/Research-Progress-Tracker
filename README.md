@@ -42,7 +42,7 @@ struggle and holding you to it.
 |---|---|
 | **Gated tasks** | Evidence → examiner question → final answer → `PASS`/`FAIL` + reason. One retry, then locked. Max three per day. |
 | **Free ticks** | Lightweight self-certified items that carry no weight in the record. |
-| **Verbal drill** | Record a single spoken take (min 4:30) → transcribed locally → the examiner audits fluency (filler rate, trailed sentences, vocabulary). You must read the **full** audit to earn credit. |
+| **Verbal drill** | Record a single spoken take (min 4:30) → transcribed via NVIDIA's hosted Riva ASR → the examiner audits fluency (filler rate, trailed sentences, vocabulary). You must read the **full** audit to earn credit. |
 | **Spaced repetition** | Anything you prove re-enters an FSRS review schedule; a forgotten item spawns a fresh gated recall task. |
 | **Focus sessions** | A timed work block whose measured duration earns the streak's "timer honored" condition. |
 | **Streak** | One server-computed number, with a single grace token per ISO week. |

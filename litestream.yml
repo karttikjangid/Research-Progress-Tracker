@@ -2,8 +2,16 @@
 # All values come from the environment (set as Space/host secrets); nothing
 # sensitive is committed. Litestream reads LITESTREAM_ACCESS_KEY_ID and
 # LITESTREAM_SECRET_ACCESS_KEY from the environment automatically.
+#
+# monitor-interval/sync-interval are both notify-driven minimums, not blind
+# polling (litestream only syncs when the DB actually has new WAL frames) —
+# tightened from the 1s/1s defaults to shrink the commit-to-Supabase window
+# after the audit-failure durability fix (backend/main.py _process). Free at
+# this app's request volume (a handful of recordings/day), since idle ticks
+# cost nothing.
 dbs:
   - path: ${SENTINEL_DB_PATH}
+    monitor-interval: 250ms
     replicas:
       - type: s3
         endpoint: ${SUPABASE_S3_ENDPOINT}
@@ -11,3 +19,4 @@ dbs:
         path: db
         region: ${SUPABASE_S3_REGION}
         force-path-style: true
+        sync-interval: 250ms

@@ -1,4 +1,5 @@
 """Durability: crash recovery, idempotent close, catch-up, migrations, export."""
+import os
 import sqlite3
 
 from conftest import ARTIFACT, gated, make_webm
@@ -33,6 +34,41 @@ def test_transcription_crash_then_retry(client, mock_llm, tmp_path, app, monkeyp
     r2 = client.post(f"/api/recordings/{rid}/retry")
     assert r2.status_code == 200 and r2.json()["status"] == "done"
     assert client.post(f"/api/recordings/{rid}/viewed").status_code == 200
+
+
+def test_failed_upload_exposes_recording_id_header(client, mock_llm, tmp_path, app,
+                                                    monkeypatch):
+    """A frontend that only sees the error response (not a 200 body) still needs
+    to know which Recording row was created so it can recover/retry it — this
+    is what frontend/src/Record.jsx's error-recovery path relies on."""
+    monkeypatch.setattr(app.transcribe, "transcribe",
+                        lambda p: (_ for _ in ()).throw(RuntimeError("boom")))
+    r = _upload(client, tmp_path)
+    assert r.status_code == 500
+    rid = client.get("/api/history").json()[0]["recordings"][0]["id"]
+    assert r.headers["X-Recording-Id"] == str(rid)
+
+
+def test_rejected_upload_has_no_recording_id_header(client, mock_llm, tmp_path):
+    """A garbage/under-4:30 upload never creates a Recording row — there is no
+    id to hand back, so the header must simply be absent (not empty/garbage)."""
+    r = _upload(client, tmp_path, seconds=10, name="short.webm")
+    assert r.status_code == 400
+    assert "X-Recording-Id" not in r.headers
+
+
+def test_get_recording_by_id(client, mock_llm, tmp_path, app, monkeypatch):
+    monkeypatch.setattr(app.transcribe, "transcribe", lambda p: "the transcript")
+    monkeypatch.setattr(app.llm, "audit_transcript", lambda t, **kw: "AUDIT ok")
+    rid = _upload(client, tmp_path).json()["id"]
+
+    out = client.get(f"/api/recordings/{rid}")
+    assert out.status_code == 200
+    body = out.json()
+    assert body["id"] == rid and body["status"] == "done"
+    assert body["transcript"] == "the transcript" and body["audit"] == "AUDIT ok"
+
+    assert client.get("/api/recordings/999999").status_code == 404
 
 
 def test_kill9_orphan_uploaded_row_recovers_via_retry(client, mock_llm, tmp_path,
@@ -74,6 +110,40 @@ def test_audit_failure_keeps_transcript_and_retries_audit_only(
     monkeypatch.setattr(app.llm, "audit_transcript", lambda t, **kw: "AUDIT ok")
     out = client.post(f"/api/recordings/{rid}/retry")
     assert out.status_code == 200 and out.json()["audit"] == "AUDIT ok"
+
+
+def test_audit_failure_survives_disk_wipe_then_retry(
+        client, mock_llm, tmp_path, app, monkeypatch):
+    """Regression for a real incident: Render's free tier has no persistent
+    disk, so a redeploy between an audit_failed recording and its retry wipes
+    the .transcript.txt/.webm files. transcript_text must already be durable
+    in the DB (replicated to Supabase by Litestream) the moment transcription
+    succeeds, and retry must use it instead of re-reading files off disk —
+    re-reading is exactly what turned one failed audit into an unrecoverable
+    transcription_failed when this actually happened."""
+    monkeypatch.setattr(app.transcribe, "transcribe", lambda p: "the transcript")
+    monkeypatch.setattr(app.llm, "audit_transcript",
+                        lambda t, **kw: (_ for _ in ()).throw(app.llm.LLMError("NIM down")))
+    r = _upload(client, tmp_path)
+    assert r.status_code == 503
+    rid = client.get("/api/history").json()[0]["recordings"][0]["id"]
+    assert _rec_status(client, rid) == "audit_failed"
+
+    from db import Recording, SessionLocal
+    s = SessionLocal()
+    row = s.get(Recording, rid)
+    assert row.transcript_text == "the transcript"  # already durable, pre-retry
+    os.remove(row.transcript_path)
+    os.remove(row.audio_path)  # simulates the ephemeral-disk wipe
+    s.close()
+
+    monkeypatch.setattr(app.transcribe, "transcribe",
+                        lambda p: (_ for _ in ()).throw(AssertionError("must not re-transcribe")))
+    monkeypatch.setattr(app.llm, "audit_transcript", lambda t, **kw: "AUDIT ok")
+    out = client.post(f"/api/recordings/{rid}/retry")
+    assert out.status_code == 200
+    assert out.json()["transcript"] == "the transcript"
+    assert out.json()["audit"] == "AUDIT ok"
 
 
 def test_retry_on_done_recording_409(client, mock_llm, tmp_path, app, monkeypatch):

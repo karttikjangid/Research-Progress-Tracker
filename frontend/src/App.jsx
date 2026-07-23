@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { get, post } from './api'
-import { headerDate } from './format'
+import { headerDate, isoWeekNumber } from './format'
 import Today from './Today'
 import Record from './Record'
 import History from './History'
@@ -31,6 +31,7 @@ export default function App() {
 
   const Active = SCREENS[screen]
   const theme = week?.themes?.[0] || ''
+  const weekLabel = week?.week_of ? `WEEK ${isoWeekNumber(week.week_of)} THEME` : undefined
 
   return (
     <>
@@ -57,7 +58,7 @@ export default function App() {
         <motion.div key={screen}
           initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
           transition={{ duration: .2, ease: 'easeOut' }}>
-          <Active closed={closed} streak={streak} theme={theme} onStreakChange={loadStreak} />
+          <Active closed={closed} streak={streak} theme={theme} weekLabel={weekLabel} onStreakChange={loadStreak} />
         </motion.div>
       </AnimatePresence>
 

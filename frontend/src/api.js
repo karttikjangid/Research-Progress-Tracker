@@ -1,7 +1,16 @@
-// Thin fetch helpers. Every non-2xx becomes a thrown Error with the server's detail.
+// Thin fetch helpers. Every non-2xx becomes a thrown Error with the server's
+// detail; if the failure happened mid-way through processing a specific
+// recording, the server also attaches X-Recording-Id (backend/main.py
+// _process) so callers can recover that recording directly instead of
+// guessing which one failed.
 async function handle(res) {
   const body = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(body.detail || `HTTP ${res.status}`)
+  if (!res.ok) {
+    const err = new Error(body.detail || `HTTP ${res.status}`)
+    const rid = res.headers.get('X-Recording-Id')
+    if (rid) err.recordingId = Number(rid)
+    throw err
+  }
   return body
 }
 

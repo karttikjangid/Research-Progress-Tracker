@@ -38,7 +38,7 @@ export default function Record() {
         <div className="dk-in" style={{ paddingBottom: '20px' }}>
           {error && <p className="s-err" style={{ margin: '16px 0 0' }}>{error}</p>}
           {(view === 'idle' || view === 'recording') && (
-            <Recorder view={view} setView={setView} setRec={setRec} setError={setError} loadLatest={loadLatest} />
+            <Recorder view={view} setView={setView} setRec={setRec} setError={setError} />
           )}
           {view === 'uploading' && (
             <div className="tc" style={{ padding: '46px 40px 40px' }}>
@@ -55,7 +55,7 @@ export default function Record() {
   )
 }
 
-function Recorder({ view, setView, setRec, setError, loadLatest }) {
+function Recorder({ view, setView, setRec, setError }) {
   const canvasRef = useRef(null)
   const timerRef = useRef(null)
   const eng = useRef(null)
@@ -122,11 +122,18 @@ function Recorder({ view, setView, setRec, setError, loadLatest }) {
       postForm('/api/recordings', fd).then((r) => { setRec(r); setView('report') })
         .catch((e) => {
           setError(e.message)
-          // Transcription/audit can fail after the row is already created (the audio
-          // is safely on disk — see backend/main.py's durability note). Recover the
-          // recording from history so the report view can offer a retry instead of
+          // A rejected upload (garbage audio / under 4:30) never creates a Recording
+          // row — no id, nothing to recover, back to idle. A failure inside _process
+          // (transcription/audit) does create a row; the audio is already safely on
+          // disk (backend/main.py's durability note), and the server hands back its
+          // id via X-Recording-Id so the report view can offer a retry instead of
           // silently dropping the take and forcing a full 5-minute re-record.
-          loadLatest().then((r) => { if (!r) setView('idle') }).catch(() => setView('idle'))
+          if (e.recordingId) {
+            get(`/api/recordings/${e.recordingId}`).then((r) => { setRec(r); setView('report') })
+              .catch(() => setView('idle'))
+          } else {
+            setView('idle')
+          }
         })
     }
     E.recorder.stop()
