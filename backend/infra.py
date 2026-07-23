@@ -24,10 +24,19 @@ for _d in (DATA_DIR, LOG_DIR):
 
 log = logging.getLogger("gatekeeper")
 if not log.handlers:
+    _fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
     _h = TimedRotatingFileHandler(LOG_DIR / "gatekeeper.log",
                                   when="midnight", backupCount=14)
-    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    _h.setFormatter(_fmt)
     log.addHandler(_h)
+    # Render (and most container hosts) only capture stdout/stderr — the file
+    # handler above writes to STATE_ROOT/logs, which on the free plan is
+    # ephemeral disk that isn't shown anywhere. Without this, every log.error /
+    # log.exception call (e.g. "recording N: audit failed: ...") is invisible
+    # in the hosting dashboard.
+    _sh = logging.StreamHandler()
+    _sh.setFormatter(_fmt)
+    log.addHandler(_sh)
     log.setLevel(logging.INFO)
 
 

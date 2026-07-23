@@ -21,12 +21,14 @@ export default function Record() {
   const [rec, setRec] = useState(null)
   const [error, setError] = useState('')
 
-  useEffect(() => {
+  const loadLatest = () =>
     get('/api/history').then((days) => {
       const r = days.find((d) => d.date === todayISO())?.recordings?.at(-1)
       if (r) { setRec(r); setView('report') }
-    }).catch(() => {})
-  }, [])
+      return r
+    })
+
+  useEffect(() => { loadLatest().catch(() => {}) }, [])
 
   const status = { idle: 'AWAITING SESSION', recording: 'RECORDING', uploading: 'PROCESSING', report: 'ON FILE' }[view]
 
@@ -36,7 +38,7 @@ export default function Record() {
         <div className="dk-in" style={{ paddingBottom: '20px' }}>
           {error && <p className="s-err" style={{ margin: '16px 0 0' }}>{error}</p>}
           {(view === 'idle' || view === 'recording') && (
-            <Recorder view={view} setView={setView} setRec={setRec} setError={setError} />
+            <Recorder view={view} setView={setView} setRec={setRec} setError={setError} loadLatest={loadLatest} />
           )}
           {view === 'uploading' && (
             <div className="tc" style={{ padding: '46px 40px 40px' }}>
@@ -44,14 +46,16 @@ export default function Record() {
               <div className="dk-req mt12">Transcribing your take and running the audit — this can take up to a minute.</div>
             </div>
           )}
-          {view === 'report' && rec && <AuditReport rec={rec} onViewed={() => setRec({ ...rec, audit_viewed: true })} />}
+          {view === 'report' && rec && (
+            <AuditReport rec={rec} onViewed={() => setRec({ ...rec, audit_viewed: true })} onRetried={setRec} />
+          )}
         </div>
       </EvidenceDoc>
     </div>
   )
 }
 
-function Recorder({ view, setView, setRec, setError }) {
+function Recorder({ view, setView, setRec, setError, loadLatest }) {
   const canvasRef = useRef(null)
   const timerRef = useRef(null)
   const eng = useRef(null)
@@ -116,7 +120,14 @@ function Recorder({ view, setView, setRec, setError }) {
       fd.append('file', new Blob(E.chunks, { type: 'audio/webm' }), 'monologue.webm')
       setView('uploading')
       postForm('/api/recordings', fd).then((r) => { setRec(r); setView('report') })
-        .catch((e) => { setError(e.message); setView('idle') })
+        .catch((e) => {
+          setError(e.message)
+          // Transcription/audit can fail after the row is already created (the audio
+          // is safely on disk — see backend/main.py's durability note). Recover the
+          // recording from history so the report view can offer a retry instead of
+          // silently dropping the take and forcing a full 5-minute re-record.
+          loadLatest().then((r) => { if (!r) setView('idle') }).catch(() => setView('idle'))
+        })
     }
     E.recorder.stop()
   }
@@ -231,11 +242,19 @@ function teardown(E) {
   E.stream.getTracks().forEach((t) => t.stop())
 }
 
-function AuditReport({ rec, onViewed }) {
+function AuditReport({ rec, onViewed, onRetried }) {
   const box = useRef(null)
   const [read, setRead] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [retrying, setRetrying] = useState(false)
+  const [retryErr, setRetryErr] = useState('')
+
+  // uploaded | transcription_failed | audit_failed | done (backend/db.py). Anything
+  // short of 'done' has no real audit text to read, so offer a retry instead of the
+  // scroll-to-unlock flow — the previous version funneled the placeholder text
+  // ("audit file missing") through MARK AS READ, which the backend correctly 409s.
+  const failed = rec.status && rec.status !== 'done'
 
   const onScroll = () => {
     const el = box.current
@@ -251,6 +270,11 @@ function AuditReport({ rec, onViewed }) {
     post(`/api/recordings/${rec.id}/viewed`).then(onViewed).catch((e) => setErr(e.message)).finally(() => setBusy(false))
   }
 
+  const retry = () => {
+    setRetrying(true); setRetryErr('')
+    post(`/api/recordings/${rec.id}/retry`).then(onRetried).catch((e) => setRetryErr(e.message)).finally(() => setRetrying(false))
+  }
+
   const viewed = rec.audit_viewed
   return (
     <>
@@ -262,17 +286,32 @@ function AuditReport({ rec, onViewed }) {
         {rec.audit || '(audit unavailable)'}
       </div>
       <div className="fx jb ac mt16">
-        {err && <p className="s-err m0">{err}</p>}
-        {!err && (
-          <span className="dk-req m0">
-            {viewed ? 'Report read and filed — verbal drill credited for today.'
-              : read ? 'Read in full — the unlock is open.'
-                : 'Scroll to the end: reading the report is the unlock.'}
-          </span>
+        {failed ? (
+          <>
+            <span className="s-err m0">
+              {retryErr || (rec.status === 'transcription_failed'
+                ? 'Transcription failed — no report was generated.'
+                : 'The audit step failed after transcription — no report was generated.')}
+            </span>
+            <button className="s-btn" onClick={retry} disabled={retrying} type="button">
+              {retrying ? 'RETRYING…' : 'RETRY AUDIT'}
+            </button>
+          </>
+        ) : (
+          <>
+            {err && <p className="s-err m0">{err}</p>}
+            {!err && (
+              <span className="dk-req m0">
+                {viewed ? 'Report read and filed — verbal drill credited for today.'
+                  : read ? 'Read in full — the unlock is open.'
+                    : 'Scroll to the end: reading the report is the unlock.'}
+              </span>
+            )}
+            {viewed
+              ? <span className="s-vs dk-p">READ</span>
+              : <button className={`s-btn${read ? '' : ' dis'}`} onClick={mark} disabled={busy || !read} type="button">MARK AS READ</button>}
+          </>
         )}
-        {viewed
-          ? <span className="s-vs dk-p">READ</span>
-          : <button className={`s-btn${read ? '' : ' dis'}`} onClick={mark} disabled={busy || !read} type="button">MARK AS READ</button>}
       </div>
     </>
   )
