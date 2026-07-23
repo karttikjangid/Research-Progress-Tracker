@@ -7,4 +7,4 @@ requests
 python-multipart
 # faster-whisper  # DISABLED — switched to NVIDIA Riva hosted API — revert by uncommenting
 nvidia-riva-client
-fsrs
+fsrs>=4.0.0  # <4.0 renamed FSRS -> Scheduler and requires Python >=3.10 (Dockerfile: python:3.11-slim)
