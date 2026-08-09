@@ -34,9 +34,9 @@ import llm  # noqa: E402
 import transcribe  # noqa: E402
 from db import (ARMS, DATA_DIR, DB_PATH, MAX_REVIEWS,  # noqa: E402
                 RECALL_PREFIX, SESSION_KINDS, SESSION_MAX_HOURS, Answer, DayLog,
-                DriftReport, GamingError, GatedLimitExceeded, Glossary,
-                LLMCall, Recording, Review, SessionLocal, Synthesis, Task,
-                TasteLog, VocabFlag, WorkSession)
+                AppSetting, DriftReport, GamingError, GatedLimitExceeded,
+                Glossary, HabitLog, LLMCall, Recording, Review, RoadmapTicket,
+                SessionLocal, Synthesis, Task, TasteLog, VocabFlag, WorkSession)
 
 ROOT = Path(__file__).resolve().parent.parent
 MIN_RECORDING_SEC = 270  # 4:30
@@ -195,9 +195,15 @@ def list_tasks(date: str | None = None, s=Depends(db)):
              .order_by(Task.id).all())
     rec = (s.query(Recording).filter(Recording.date == date)
            .order_by(Recording.id.desc()).first())
+    # had_session_today mirrors _close_line's `has_sessions`: the day-close
+    # TASTELOG-MISSING flag only fires when the day had ≥1 work session, so the
+    # close modal must know this to warn on exactly the same rule (not a stricter
+    # or looser one).
+    had_session = s.query(WorkSession).filter(WorkSession.date == date).count() > 0
     return {"date": date,
             "tasks": [t.as_dict() for t in tasks],
             "reviews_due": _reviews_due_count(s, date),
+            "had_session_today": had_session,
             "verbal": {"recorded": rec is not None,
                        "done": bool(rec and rec.audit_viewed),
                        "recording_id": rec.id if rec else None}}
@@ -736,6 +742,22 @@ class SessionEnd(BaseModel):
     notes: str | None = None
 
 
+@app.get("/api/sessions/current")
+def current_session(s=Depends(db)):
+    """Backend-authoritative truth for 'is a session actually running', so the
+    frontend's localStorage cache (which only updates on a clean end_session
+    call) can reconcile after a server restart, crash, or stale reload instead
+    of showing a false lock. Sweeps >6h stragglers first so this is never
+    itself stale. Supersedes the work-sessions session's 'no GET-sessions
+    endpoint by design' — that call was about avoiding an unneeded surface,
+    not a deliberate ban; a read-only reconciliation source is worth adding to
+    fix a real false-lock bug per CLAUDE.md's authority to relax brittle
+    locking. See SESSION_LOG.md."""
+    _sweep_open_sessions(s, close_all=False)
+    sess = s.query(WorkSession).filter(WorkSession.ended_at == "").first()
+    return sess.as_dict() if sess else None
+
+
 @app.post("/api/sessions/start", status_code=201)
 def start_session(body: SessionStart, s=Depends(db)):
     _sweep_open_sessions(s, close_all=False)  # retire >6h stragglers before the check
@@ -972,6 +994,30 @@ def search_glossary(q: str | None = None, s=Depends(db)):
     return [g.as_dict() for g in query.order_by(Glossary.id.desc())]
 
 
+@app.get("/api/vocab")
+def vocab_ledger(s=Depends(db)):
+    """Cumulative vocabulary error profile. Grouped by (term_used, term_meant)
+    with a repeat count so a recurring confusion outweighs a one-off. Count
+    desc, then most-recent first among equal counts. Read-only — the flags are
+    written only by llm._record() when the examiner emits a VOCAB_FLAG line."""
+    groups: dict[tuple[str, str], dict] = {}
+    for v in s.query(VocabFlag).order_by(VocabFlag.id).all():
+        key = (v.term_used, v.term_meant)
+        g = groups.get(key)
+        if g is None:
+            groups[key] = g = {"term_used": v.term_used, "term_meant": v.term_meant,
+                               "count": 0, "last_date": v.date, "sources": set()}
+        g["count"] += 1
+        if v.date >= g["last_date"]:
+            g["last_date"] = v.date
+        g["sources"].add(v.source)
+    out = [{"term_used": g["term_used"], "term_meant": g["term_meant"],
+            "count": g["count"], "last_date": g["last_date"],
+            "sources": sorted(g["sources"])} for g in groups.values()]
+    out.sort(key=lambda g: (g["count"], g["last_date"]), reverse=True)
+    return out
+
+
 # ---------- day close / week / history ----------
 
 def _summary(s, date: str) -> str:
@@ -1101,8 +1147,51 @@ def close_day(body: DayCloseIn | None = None, s=Depends(db)):
 @app.get("/api/streak")
 def streak(s=Depends(db)):
     row = s.query(DayLog).order_by(DayLog.date.desc()).first()
+    # closed_today: the frontend's only backend-truth source for "is today's
+    # file already closed" — without it, App.jsx's `closed` flag lived purely
+    # in React state and reverted to false on every reload/reopen even though
+    # the day was genuinely closed (bug: "completed day doesn't show as
+    # complete"). See SESSION_LOG.md.
     return {"current_streak": row.current_streak if row else 0,
-            "longest_streak": row.longest_streak if row else 0}
+            "longest_streak": row.longest_streak if row else 0,
+            "closed_today": bool(row and row.date == today())}
+
+
+@app.get("/api/streak/today")
+def streak_today(s=Depends(db)):
+    """The three streak conditions, evaluated PROVISIONALLY for today.
+
+    Read-only and deliberately NON-PERSISTING: decisions.md is explicit that
+    the streak is computed only at day-close, and writing a day_log row here
+    would make `_catch_up` treat today as already closed. This recomputes the
+    same predicates `_streak_values` uses so the UI can show which conditions
+    are met and — the point — which are still fixable before closing, instead
+    of the streak being a verdict you only see afterwards.
+
+    `fixable` distinguishes a condition you can still satisfy today (start and
+    finish the timer, grade the overdue review) from one that is already
+    settled (a task that ended failed_final cannot be un-failed today)."""
+    date = today()
+    th = _timer_honored(s, date)
+    failed_final = s.query(Task).filter(
+        Task.date == date, Task.status == "failed_final").count() > 0
+    cutoff = (dt.date.fromisoformat(date)
+              - dt.timedelta(days=MAX_OVERDUE_STREAK_DAYS)).isoformat()
+    overdue = s.query(Review).filter(
+        Review.status == "due", Review.due_date < cutoff).count() > 0
+    return {
+        "date": date,
+        "streak_day": th and not failed_final and not overdue,
+        "grace_available": not _grace_used_this_week(s, date),
+        "conditions": [
+            {"key": "timer", "met": th, "fixable": True,
+             "label": "Finish a struggle timer for its planned minutes"},
+            {"key": "no_failed_final", "met": not failed_final, "fixable": False,
+             "label": "No exhibit failed twice"},
+            {"key": "reviews_current", "met": not overdue, "fixable": True,
+             "label": f"No review overdue by more than {MAX_OVERDUE_STREAK_DAYS} days"},
+        ],
+    }
 
 
 def _opt(fn, default):
@@ -1225,14 +1314,56 @@ def week():
         return {}
 
 
+# ---- editable current-week theme ----------------------------------------
+# week.yaml's theme is the plan's default and can go stale (its week_of drifts
+# out of the current week). The owner can override it with their own text; the
+# label is computed from TODAY's ISO week so it's never a stale number.
+_THEME_KEY = "week_theme"
+
+
+@app.get("/api/theme")
+def get_theme(s=Depends(db)):
+    row = s.get(AppSetting, _THEME_KEY)
+    plan = ((week().get("themes") or [""]) or [""])[0]
+    custom = row.value if (row and row.value) else None
+    return {"theme": custom if custom is not None else plan,
+            "custom": custom is not None,
+            "plan_theme": plan,
+            "week": dt.date.fromisoformat(today()).isocalendar()[1]}
+
+
+class ThemeIn(BaseModel):
+    theme: str
+
+
+@app.put("/api/theme")
+def set_theme(body: ThemeIn, s=Depends(db)):
+    """Set the owner's own theme. An empty string clears the override, reverting
+    to the plan's week.yaml theme."""
+    text = body.theme.strip()
+    row = s.get(AppSetting, _THEME_KEY)
+    if not text:                                   # clear → revert to plan
+        if row:
+            s.delete(row)
+    elif row:
+        row.value = text
+    else:
+        s.add(AppSetting(key=_THEME_KEY, value=text))
+    s.commit()
+    return get_theme(s)
+
+
 @app.get("/api/history")
 def history(s=Depends(db)):
     # A day with only an end-of-day reflection (no task/recording) still belongs
     # in History, so union in tastelog dates — but NOT reflection anchor tasks
     # (those would double-count and, in _catch_up, spuriously late-close a day).
+    # DayLog dates are unioned in too: a day that was closed (even with only a
+    # timer or reflection) is part of the record and must show in History and
+    # feed the momentum grid, not vanish just because it filed no Task.
     dates = sorted({d for (d,) in s.query(Task.date)
                     .filter(Task.type != "reflection").union(s.query(Recording.date))
-                    .union(s.query(TasteLog.date))}, reverse=True)
+                    .union(s.query(TasteLog.date)).union(s.query(DayLog.date))}, reverse=True)
     out = []
     for date in dates:
         recs = []
@@ -1269,14 +1400,101 @@ def history(s=Depends(db)):
 # The plan lives in roadmap.json at the repo root; ROADMAP_PATH overrides it.
 # A missing or malformed file yields an empty roadmap rather than a 500, so the
 # ROADMAP tab shows a clean "no roadmap on file" state instead of an error.
-@app.get("/api/roadmap")
-def roadmap():
+def _roadmap_json() -> dict:
     path = Path(os.getenv("ROADMAP_PATH", str(ROOT / "roadmap.json")))
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
+        return {}
+
+
+def _roadmap_ticket_ids(data: dict) -> set[str]:
+    return {t["id"] for p in data.get("phases", []) for t in p.get("tickets", [])
+            if "id" in t}
+
+
+def _valid_date(value: str) -> bool:
+    try:
+        dt.date.fromisoformat(value)
+        return True
+    except ValueError:
+        return False
+
+
+@app.get("/api/roadmap")
+def roadmap(s=Depends(db)):
+    """The plan (roadmap.json) merged with per-ticket DB state. Each ticket
+    gains `status`/`done_date` and an EFFECTIVE `deadline`: the user's override
+    when set, the user's explicit clear ('' = no deadline) when cleared, else
+    the plan's own deadline. `plan_deadline` preserves the original so the UI
+    can offer 'revert to plan'."""
+    data = _roadmap_json()
+    if not data.get("meta"):
         return {"meta": None, "phases": []}
+    state = {r.ticket_id: r for r in s.query(RoadmapTicket).all()}
+    for p in data.get("phases", []):
+        for t in p.get("tickets", []):
+            row = state.get(t.get("id"))
+            t["plan_deadline"] = t.get("deadline")
+            t["status"] = row.status if row else "open"
+            t["done_date"] = row.done_date if row else ""
+            if row is not None and row.deadline is not None:
+                t["deadline"] = row.deadline  # override or explicit clear ('')
     return {"meta": data.get("meta"), "phases": data.get("phases", [])}
+
+
+class RoadmapTicketUpdate(BaseModel):
+    status: str | None = None            # 'open' | 'done'
+    deadline: str | None = None          # a YYYY-MM-DD date, or '' for no deadline
+    revert_deadline: bool = False        # drop the override, use the plan's date
+
+    @field_validator("status")
+    @classmethod
+    def _status(cls, v):
+        if v is not None and v not in ("open", "done"):
+            raise ValueError("status must be 'open' or 'done'")
+        return v
+
+
+@app.post("/api/roadmap/tickets/{ticket_id}")
+def update_roadmap_ticket(ticket_id: str, body: RoadmapTicketUpdate,
+                          s=Depends(db)):
+    if ticket_id not in _roadmap_ticket_ids(_roadmap_json()):
+        raise HTTPException(404, "no such ticket in roadmap.json")
+    if body.deadline not in (None, "") and not _valid_date(body.deadline):
+        raise HTTPException(422, "deadline must be YYYY-MM-DD or '' to clear")
+    row = s.get(RoadmapTicket, ticket_id)
+    if row is None:
+        row = RoadmapTicket(ticket_id=ticket_id)
+        s.add(row)
+    if body.status is not None:
+        row.status = body.status
+        row.done_date = today() if body.status == "done" else ""
+    if body.revert_deadline:
+        row.deadline = None                       # fall back to the plan's date
+    elif body.deadline is not None:
+        row.deadline = body.deadline              # set, or '' to clear
+    row.updated_ts = clock.now_utc().isoformat(timespec="seconds")
+    s.commit()
+    return {"ticket_id": ticket_id, "status": row.status,
+            "done_date": row.done_date, "deadline": row.deadline}
+
+
+@app.post("/api/roadmap/reset")
+def reset_roadmap(s=Depends(db)):
+    """Clear the stale all-overdue state in one move: every ticket goes back to
+    'open' with NO deadline (''), so nothing reads overdue and the user can set
+    fresh deadlines. Upserts a row per ticket so the clear is explicit, not a
+    fallthrough to the plan's (past) dates."""
+    ids = _roadmap_ticket_ids(_roadmap_json())
+    now = clock.now_utc().isoformat(timespec="seconds")
+    existing = {r.ticket_id: r for r in s.query(RoadmapTicket).all()}
+    for tid in ids:
+        row = existing.get(tid) or RoadmapTicket(ticket_id=tid)
+        row.status, row.done_date, row.deadline, row.updated_ts = "open", "", "", now
+        s.add(row)
+    s.commit()
+    return {"reset": len(ids)}
 
 
 # ---- daily operating protocol (read-only) -------------------------------
@@ -1290,6 +1508,99 @@ def protocol():
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, ValueError):
         return {}
+
+
+# ---- daily habits (the non-negotiables, made tickable) --------------------
+# The protocol's own motto is "track inputs, not outcomes" — a non-negotiable
+# IS an input, so ticking one is the motto's purest expression, not a departure
+# from it. The habit definitions stay in Daily_protocol.json (single source of
+# truth for what the rules ARE); only the ticks live in the DB.
+HABIT_WINDOW = 7  # days shown in the per-habit strip
+
+
+def _habit_defs() -> list[dict]:
+    """The non-negotiables, in file order. Ids are required and stable."""
+    out = []
+    for i, n in enumerate(protocol().get("non_negotiables", [])):
+        hid = n.get("id") or f"nn{i + 1}"
+        out.append({"id": hid, "title": n.get("title", ""),
+                    "explanation": n.get("explanation", "")})
+    return out
+
+
+def _habit_streak(done_dates: set[str], date: str) -> int:
+    """Consecutive days ending at `date`. Today not being ticked YET doesn't
+    break the streak — a day is only a miss once it's over, so we start the walk
+    at yesterday when today is unticked. Otherwise every morning would show 0
+    and the number would be useless as a motivator."""
+    d = dt.date.fromisoformat(date)
+    if date not in done_dates:
+        d -= dt.timedelta(days=1)
+    n = 0
+    while d.isoformat() in done_dates:
+        n += 1
+        d -= dt.timedelta(days=1)
+    return n
+
+
+@app.get("/api/habits")
+def habits(s=Depends(db)):
+    """Today's non-negotiables with tick state, streak, and a 7-day strip.
+    `target_pct` comes from the protocol's own success_bar ("70% of days") — the
+    UI marks it so the bar reads as 'the system is working', not 'you failed to
+    hit 100%'."""
+    date = today()
+    defs = _habit_defs()
+    ids = [h["id"] for h in defs]
+    rows = (s.query(HabitLog)
+            .filter(HabitLog.habit_id.in_(ids), HabitLog.done.is_(True)).all()
+            if ids else [])
+    by_habit: dict[str, set[str]] = {}
+    for r in rows:
+        by_habit.setdefault(r.habit_id, set()).add(r.date)
+
+    window = [(dt.date.fromisoformat(date) - dt.timedelta(days=i)).isoformat()
+              for i in range(HABIT_WINDOW - 1, -1, -1)]
+    out = []
+    for h in defs:
+        done_dates = by_habit.get(h["id"], set())
+        out.append({**h,
+                    "done": date in done_dates,
+                    "streak": _habit_streak(done_dates, date),
+                    "week": [{"date": d, "done": d in done_dates} for d in window]})
+    done_today = sum(h["done"] for h in out)
+    return {"date": date, "habits": out,
+            "done_today": done_today, "total": len(out),
+            "target_pct": _target_pct()}
+
+
+def _target_pct() -> int:
+    """Parse the first percentage out of the protocol's success_bar sentence
+    ('Hitting 70% of days = the system is working'). Falls back to 70 — the
+    point is that the bar has a realistic mark, never that it demands 100%."""
+    m = re.search(r"(\d{1,3})\s*%", protocol().get("success_bar", "") or "")
+    return int(m.group(1)) if m else 70
+
+
+class HabitToggle(BaseModel):
+    done: bool | None = None  # omitted = flip whatever it is now
+
+
+@app.post("/api/habits/{habit_id}/toggle")
+def toggle_habit(habit_id: str, body: HabitToggle | None = None, s=Depends(db)):
+    if habit_id not in {h["id"] for h in _habit_defs()}:
+        raise HTTPException(404, "no such habit in Daily_protocol.json")
+    date = today()
+    row = s.get(HabitLog, {"date": date, "habit_id": habit_id})
+    want = (not (row.done if row else False)) if (body is None or body.done is None) \
+        else body.done
+    if row is None:
+        row = HabitLog(date=date, habit_id=habit_id)
+        s.add(row)
+    row.done = want
+    row.ts = clock.now_utc().isoformat(timespec="seconds")
+    s.commit()
+    return {"habit_id": habit_id, "date": date, "done": row.done}
 
 
 # Serve the built frontend (production). Mounted LAST so every /api route above

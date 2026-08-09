@@ -1,6 +1,6 @@
 """Evaluator integrity: audit trail, freshness, harder retries, stats,
 vocab ledger, drift review — and one full simulated week."""
-from conftest import ANSWER, ARTIFACT, gated, make_webm
+from conftest import ANSWER, ARTIFACT, freeze, gated, make_webm
 
 
 def _capture_chat(app, monkeypatch, reply):
@@ -157,6 +157,9 @@ def test_drift_review_no_flip_no_report(client, app, monkeypatch):
 # ---------- the simulated week ----------
 
 def test_simulated_week_export(client, app, monkeypatch, tmp_path):
+    freeze(app, "2026-07-11")  # tasks below are backdated Jul 5-10; "today" must
+    # actually be the 11th or llm_calls (timestamped from real now(), not the
+    # task's date) land outside the ?from=&to= export window and vanish.
     n = {"i": 0}
 
     def week_chat(system, user, **kw):

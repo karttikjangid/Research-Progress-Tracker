@@ -359,6 +359,38 @@ class DayLog(Base):
     longest_streak: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class AppSetting(Base):
+    """Generic single-user key/value settings (e.g. the editable week theme)."""
+    __tablename__ = "app_setting"
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String, default="")
+
+
+class RoadmapTicket(Base):
+    """Mutable per-ticket state for the ROADMAP page — done status and a
+    user-owned deadline. Keyed by the STABLE ticket id from roadmap.json (A1,
+    B2…), never the topic text. `deadline` is three-way: NULL = use the plan's
+    own deadline, '' = user cleared it (no deadline), a date = user override."""
+    __tablename__ = "roadmap_ticket"
+    ticket_id: Mapped[str] = mapped_column(String, primary_key=True)
+    status: Mapped[str] = mapped_column(String, default="open")
+    done_date: Mapped[str] = mapped_column(String, default="")
+    deadline: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_ts: Mapped[str] = mapped_column(String, default="")
+
+
+class HabitLog(Base):
+    """One tick of a daily non-negotiable. Keyed by (date, habit_id) where
+    habit_id is the stable id from Daily_protocol.json — never the title text,
+    so rewording a non-negotiable keeps its history. No row = not done; days the
+    app was never opened stay empty rather than counting as misses."""
+    __tablename__ = "habit_log"
+    date: Mapped[str] = mapped_column(String, primary_key=True)
+    habit_id: Mapped[str] = mapped_column(String, primary_key=True)
+    done: Mapped[bool] = mapped_column(Boolean, default=False)
+    ts: Mapped[str] = mapped_column(String, default="")
+
+
 class Glossary(Base):
     """Decoded notation. Overloaded symbols are surfaced, never deduplicated:
     the same symbol with a different meaning flags is_overload on every row

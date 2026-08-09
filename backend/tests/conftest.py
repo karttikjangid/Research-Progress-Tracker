@@ -1,3 +1,4 @@
+import datetime as dt
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +19,7 @@ ANSWER = ("The gradient expression is unchanged because it never required full "
           "so descent simply never moves along the flat directions.")
 
 
-MODS = ("main", "db", "llm", "transcribe", "infra")
+MODS = ("main", "db", "llm", "transcribe", "infra", "clock")
 
 
 @pytest.fixture()
@@ -78,3 +79,18 @@ def gated(client, title="Gated"):
     r = client.post("/api/tasks", json={"title": title, "type": "gated"})
     assert r.status_code == 201
     return r.json()["id"]
+
+
+def freeze(app, date_str, hour=12):
+    """Freeze 'now' for a test. Patches app.today/app._now (what most route
+    logic calls) AND app.clock.now_utc directly — llm.py's audit-trail
+    timestamps (_record in llm.py) call clock.now_utc() straight, bypassing
+    main._now, so a freeze that only patches the latter silently leaves
+    llm_calls rows stamped with the real wall-clock time. Found via
+    test_simulated_week_export failing off of its assumed date; see
+    SESSION_LOG.md."""
+    d = dt.date.fromisoformat(date_str)
+    when = dt.datetime(d.year, d.month, d.day, hour, tzinfo=dt.timezone.utc)
+    app.today = lambda: date_str
+    app._now = lambda: when
+    app.clock.now_utc = lambda: when

@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from conftest import ANSWER, ARTIFACT, gated
+from conftest import ANSWER, ARTIFACT, freeze, gated
 
 
 # ---------- helpers ----------
@@ -27,12 +27,6 @@ def all_reviews(client):
 
 def open_review_for(client, tid):
     return next(r["id"] for r in all_reviews(client) if r["source_task_id"] == tid)
-
-
-def freeze(app, date_str, hour=12):
-    d = dt.date.fromisoformat(date_str)
-    app.today = lambda: date_str
-    app._now = lambda: dt.datetime(d.year, d.month, d.day, hour, tzinfo=dt.timezone.utc)
 
 
 # ---------- the enforced order ----------
@@ -273,7 +267,8 @@ def test_longest_streak_is_high_water_mark(app, client):
     freeze(app, "2026-07-17")  # miss #2 → break to 0, longest stays 3
     _close(client, False)
     assert _daylog(app, "2026-07-17")[2:] == (0, 3)
-    assert client.get("/api/streak").json() == {"current_streak": 0, "longest_streak": 3}
+    assert client.get("/api/streak").json() == {
+        "current_streak": 0, "longest_streak": 3, "closed_today": True}
 
 
 def test_day_close_idempotent_with_streak_and_timer_persisted(app, client):

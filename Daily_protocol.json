@@ -98,11 +98,6 @@
       "id": "talk_upward",
       "title": "At least one sharp question to mentors",
       "explanation": "Ask David/Javier real technical questions, share half-finished thinking. Explaining and defending ideas to humans is cognitively demanding in ways solo study isn't. Asking sharp questions is how you look senior, not junior."
-    },
-    {
-      "id": "rhr_check",
-      "title": "Resting heart rate — Sunday morning before getting up",
-      "explanation": "Currently 78. If the sleep + polarized training system works, expect a drift toward low 70s over ~8 weeks. If it climbs for 2+ weeks, you're under-recovering — add rest."
     }
   ],
 
@@ -110,16 +105,13 @@
     { "rule": "Breakfast non-optional on training days", "explanation": "Skipping breakfast 3x/week while training daily and taking creatine works against yourself. 5-minute version is fine." },
     { "rule": "Protein anchor at every meal", "explanation": "Eggs, dal, paneer, curd, soy chunks (cheapest protein per rupee), whey if budget allows. Target ~1.6 g per kg bodyweight per day." },
     { "rule": "Creatine 3-4 g daily, any time", "explanation": "Keep it. Consistency beats timing. Stay at the top of your 2-3 L water range." },
-    { "rule": "Caffeine: nothing after 2 PM", "explanation": "Your one morning black coffee is genuinely good — keep exactly that." },
-    { "rule": "At home: one sweet portion per day, don't ban", "explanation": "Banning sweets at a family table is an unwinnable fight. Portion rule + protein at every meal + daily training slot is enough. Two weeks of weight fluctuation is noise — don't let it become a stress input." },
-    { "rule": "One-time: vitamin D + B12 blood test", "explanation": "~₹1,000-1,500 at any lab. You've never tested; deficiency in both is extremely common and directly hits energy, mood, and focus. If low, discuss supplements with a doctor — don't guess." }
+    { "rule": "Caffeine: nothing after 2 PM", "explanation": "Your one morning black coffee is genuinely good — keep exactly that." }
   ],
 
   "scorecard": [
     { "metric": "Wake at 7:00 (±30 min)", "target": "6/7 days" },
     { "metric": "Deep-work blocks (90 min)", "target": "15+/week" },
     { "metric": "Training sessions per template", "target": "5-6/week" },
-    { "metric": "Screen-free wind-down", "target": "5/7 nights" },
-    { "metric": "Resting HR (Sunday AM)", "target": "Trending down over 8 weeks" }
+    { "metric": "Screen-free wind-down", "target": "5/7 nights" }
   ]
 }
