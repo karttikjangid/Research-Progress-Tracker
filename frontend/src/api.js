@@ -23,5 +23,12 @@ export const post = (url, data) =>
     body: data !== undefined ? JSON.stringify(data) : undefined,
   }).then(handle)
 
+export const put = (url, data) =>
+  fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(handle)
+
 export const postForm = (url, formData) =>
   fetch(url, { method: 'POST', body: formData }).then(handle)

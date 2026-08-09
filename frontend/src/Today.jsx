@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { get, post } from './api'
-import { clock, todayISO } from './format'
-import StreakChip from './components/StreakChip'
+import { clock, daysUntil, dueLabel } from './format'
+import Momentum from './components/Momentum'
 import ThemeStrip from './components/ThemeStrip'
 import ExhibitCard from './components/ExhibitCard'
 import TicksStrip from './components/TicksStrip'
@@ -20,7 +20,7 @@ const FOCUS_TOP = 8
 // actionable exhibits in the fan when there are more than three on file.
 const unresolvedFirst = (t) => (t.status === 'open' || t.status === 'failed_once' ? 0 : 1)
 
-export default function Today({ closed = false, streak, theme, weekLabel, onStreakChange }) {
+export default function Today({ closed = false, streak, onStreakChange }) {
   const [data, setData] = useState(null)
   const [recent, setRecent] = useState([])
   const [error, setError] = useState('')
@@ -59,6 +59,25 @@ export default function Today({ closed = false, streak, theme, weekLabel, onStre
   }, [])
   useEffect(() => { refresh() }, [refresh])
   useEffect(() => { get('/api/history').then(setRecent).catch(() => setRecent([])) }, [])
+
+  // Reconcile the localStorage session cache against backend truth on mount.
+  // localStorage only clears on a clean endSession() call, so a server
+  // restart, crash, or a reload after the backend's own >6h auto-close leaves
+  // a false "session running" lock with no way to clear it — this is exactly
+  // that reported bug. Trust the backend: gone means gone, still-open keeps
+  // its cached task_id (backend has no task link) so the right card still
+  // shows the live timer.
+  useEffect(() => {
+    get('/api/sessions/current').then((cur) => {
+      if (!cur) { storeSession(null); return }
+      setSession((prev) => {
+        const merged = { ...cur, task_id: prev && prev.id === cur.id ? prev.task_id : null }
+        storeSession(merged)
+        return merged
+      })
+    }).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // The deal-in stagger only applies to the first render; later animations snap.
   useEffect(() => { const t = setTimeout(() => setDealt(true), 900); return () => clearTimeout(t) }, [])
@@ -193,9 +212,22 @@ export default function Today({ closed = false, streak, theme, weekLabel, onStre
     )
   }
 
+  // A session can outlive the card it was started from (e.g. it rolls off
+  // today's 3-card fan, or the day turned over) — no exhibit is left to show
+  // an END button on. Surface a fallback control instead of leaving the lock
+  // silently unrecoverable until the backend's 6h auto-close.
+  const orphanSession = session && !gated.some((t) => t.id === session.task_id)
+
   return (
     <>
       {error && <p className="s-err" style={{ marginTop: '24px' }}>{error}</p>}
+
+      {orphanSession && (
+        <div className="s-panel fx jb ac" style={{ marginTop: '16px' }}>
+          <span className="fs13">A timed session is still running ({session.kind}, started {new Date(session.started_at).toLocaleTimeString()}) but its exhibit isn't on today's file.</span>
+          <button className="s-mini-btn dk-f" type="button" onClick={() => endSession(null)}>■ END SESSION</button>
+        </div>
+      )}
 
       <AnimatePresence>
         {focused != null && (
@@ -211,13 +243,12 @@ export default function Today({ closed = false, streak, theme, weekLabel, onStre
         </div>
       )}
 
-      <div className="fx jb mt24" style={{ alignItems: 'flex-start' }}>
-        <StreakChip
-          day={closed ? 0 : (streak?.current_streak ?? '—')}
-          note={closed ? 'BROKEN — RESETS AT 00:00' : streak ? `STREAK INTACT · LONGEST ${streak.longest_streak}` : 'STREAK'} />
-        <SevenDayMarks days={buildLast7(recent)} />
-        <ThemeStrip theme={theme || '—'} label={weekLabel} />
+      <div className="mo-top mt24">
+        <Momentum streak={streak} closed={closed} history={recent} />
+        <ThemeStrip />
       </div>
+
+      {!closed && <StreakConditions />}
 
       {gated.length === 0 ? (
         <div className="s-panel" style={{ marginTop: '30px' }}>
@@ -282,35 +313,51 @@ export default function Today({ closed = false, streak, theme, weekLabel, onStre
   )
 }
 
-// ---- last-7-days marks ----------------------------------------------------
-const DOW1 = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+// WHAT TODAY STILL NEEDS — the three streak conditions, provisionally.
+// The streak used to be a verdict delivered at close with no explanation: the
+// chip said BROKEN and nothing said why, or which conditions were still
+// within reach. This makes the truth table visible while it can still be
+// acted on. Display-only — the server computes every predicate (and does not
+// persist them; see GET /api/streak/today), nothing is scored here.
+function StreakConditions() {
+  const [d, setD] = useState(null)
+  useEffect(() => { get('/api/streak/today').then(setD).catch(() => setD(null)) }, [])
+  if (!d) return null
 
-function buildLast7(days) {
-  const map = Object.fromEntries((days || []).map((d) => [d.date, d]))
-  const base = new Date()
-  const out = []
-  for (let k = 6; k >= 0; k--) {
-    const dt = new Date(base); dt.setDate(base.getDate() - k)
-    const iso = dt.toISOString().slice(0, 10)
-    const d = map[iso]
-    let state = 'none'
-    if (d) state = d.streak_day ? 'clean' : d.summary_line ? 'broken' : 'open'
-    out.push({ iso, dow: DOW1[dt.getDay()], state, today: iso === todayISO() })
-  }
-  return out
-}
-
-function SevenDayMarks({ days }) {
+  const unmet = d.conditions.filter((c) => !c.met)
   return (
-    <div className="tc">
-      <div className="s-marks-lab">LAST 7 DAYS</div>
-      <div className="s-marks">
-        {days.map((d) => (
-          <div key={d.iso} className={`s-mark ${d.state}${d.today ? ' today' : ''}`} title={`${d.iso} — ${d.state}`}>
-            <span className="s-mark-d">{d.dow}</span>
-          </div>
-        ))}
+    <div className="s-panel" style={{ marginTop: '18px' }}>
+      <div className="fx jb ac gap16" style={{ flexWrap: 'wrap' }}>
+        <span className="s-lab">
+          {d.streak_day ? 'TODAY COUNTS TOWARD THE STREAK' : 'WHAT TODAY STILL NEEDS'}
+        </span>
+        {!d.streak_day && (
+          <span className="s-hint" style={{ margin: 0 }}>
+            {d.grace_available
+              ? 'This week’s grace token is unspent — one missed day survives.'
+              : 'Grace already spent this week — a miss breaks the streak.'}
+          </span>
+        )}
       </div>
+      <div style={{ marginTop: '10px' }}>
+        {d.conditions.map((c) => {
+          // Three states, not two: met / still fixable today / already settled.
+          // A twice-failed exhibit cannot be un-failed, so flagging it as a
+          // to-do would be a lie — it reads as closed, not actionable.
+          const tone = c.met ? 'dk-p' : c.fixable ? '' : 'dk-f'
+          const mark = c.met ? '[×]' : c.fixable ? '[ ]' : '[—]'
+          return (
+            <div key={c.key} className="fs13" style={{ padding: '4px 0', lineHeight: 1.5 }}>
+              <span className={`fw7 ${tone}`}>{mark}</span>{' '}
+              <span className={c.met ? 'dk-off' : ''}>{c.label}</span>
+              {!c.met && !c.fixable && <span className="s-hint"> — settled for today</span>}
+            </div>
+          )
+        })}
+      </div>
+      {!d.streak_day && unmet.every((c) => c.fixable) && (
+        <div className="s-hint">Still reachable — close the day only once these are done.</div>
+      )}
     </div>
   )
 }
@@ -335,11 +382,95 @@ function Ancillary({ onChange }) {
       <div className="s-anc-h">ANCILLARY RECORD</div>
       <div className="s-panels" style={{ marginTop: '16px' }}>
         <div className="fx col gap16">
+          <Docket onChange={onChange} />
           <FileItem onChange={onChange} />
           <DueReviews onChange={onChange} />
         </div>
         <TasteLog />
       </div>
+    </div>
+  )
+}
+
+// THE DOCKET — the roadmap's most urgent tickets, filable in one click.
+// The roadmap already knows exactly what is due and by when; before this, that
+// knowledge was trapped on a read-only tab and every morning started by
+// retyping a ticket's topic by hand into the FILE A NEW ITEM box. This closes
+// that loop: overdue-first, showing the ticket's real standard of proof so the
+// bar is visible before the work starts, one click to put it behind the
+// examiner. Tickets already on today's file are excluded so the list is always
+// "what's left", never a re-file trap.
+function Docket({ onChange }) {
+  const [tickets, setTickets] = useState(null)
+  const [filed, setFiled] = useState([])
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const [open, setOpen] = useState(null)
+
+  useEffect(() => {
+    Promise.all([get('/api/roadmap'), get('/api/tasks')])
+      .then(([rm, t]) => {
+        const titles = new Set((t.tasks || []).map((x) => x.title))
+        const flat = (rm.phases || []).flatMap((p) =>
+          (p.tickets || []).map((tk) => ({ ...tk, phase: p.name })))
+        setTickets(flat.filter((tk) => tk.deadline && tk.status !== 'done' && !titles.has(tk.topic)))
+        setFiled([...titles])
+      })
+      .catch((e) => setErr(e.message))
+  }, [])
+
+  const file = (tk) => {
+    if (busy) return
+    setBusy(tk.id); setErr('')
+    post('/api/tasks', { title: tk.topic, type: 'gated' })
+      .then(() => { setFiled((f) => [...f, tk.topic]); onChange?.() })
+      .catch((e) => setErr(e.message))
+      .finally(() => setBusy(''))
+  }
+
+  if (!tickets) return null
+  const up = tickets
+    .filter((tk) => !filed.includes(tk.topic))
+    .sort((a, b) => daysUntil(a.deadline) - daysUntil(b.deadline))
+    .slice(0, 3)
+  if (!up.length) return null
+
+  return (
+    <div className="s-card">
+      <div className="s-lab">THE DOCKET — WHAT THE PLAN SAYS IS DUE</div>
+      {err && <p className="s-err" style={{ margin: '8px 0' }}>{err}</p>}
+      <div style={{ marginTop: '10px' }}>
+        {up.map((tk) => {
+          const late = daysUntil(tk.deadline) < 0
+          const proof = tk.reconstruction_gate || tk.code_proof
+          return (
+            <div key={tk.id} style={{ padding: '10px 0', borderTop: '1px dashed rgba(36,31,21,.3)' }}>
+              <div className="fx jb ac gap8">
+                <span className="fs13">
+                  <span className="s-muted">{tk.id}</span>{' '}
+                  <span className="fw7">{tk.topic}</span>
+                  {' '}<span className={late ? 'dk-f fw7' : 's-muted'}>· {dueLabel(tk.deadline)}</span>
+                </span>
+                <button className="s-mini-btn" type="button" disabled={busy === tk.id}
+                  onClick={() => file(tk)}>{busy === tk.id ? 'FILING…' : 'FILE AS EXHIBIT'}</button>
+              </div>
+              {proof && (
+                <div style={{ marginTop: '6px' }}>
+                  <button className="s-hint" type="button"
+                    style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', textAlign: 'left', font: 'inherit' }}
+                    onClick={() => setOpen(open === tk.id ? null : tk.id)}>
+                    {open === tk.id ? '▾' : '▸'} standard of proof
+                  </button>
+                  {open === tk.id && (
+                    <div className="fs12" style={{ marginTop: '6px', lineHeight: 1.5, fontStyle: 'italic' }}>{proof}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <div className="s-hint">Filing puts the ticket behind the examiner — same evidence bar as any gated exhibit.</div>
     </div>
   )
 }
