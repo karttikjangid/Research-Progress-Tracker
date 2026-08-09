@@ -55,9 +55,27 @@ export default function Record() {
   )
 }
 
+// Live feedback on the 4:30 floor while recording — previously the only way
+// to learn a take was too short was to stop and get the "Be Brave" discard
+// notice after the fact, discarding real spoken minutes. Written straight to
+// the DOM (like the timer) rather than React state, so it doesn't force a
+// re-render every animation frame.
+const floorNote = (el, now) => {
+  if (!el) return
+  const remain = MIN_SEC - now
+  if (remain > 0) {
+    el.textContent = `${fmtRuler(Math.ceil(remain))} short of the 4:30 floor`
+    el.style.color = ''
+  } else {
+    el.textContent = '4:30 floor reached — safe to stop anytime'
+    el.style.color = '#2f6b58'
+  }
+}
+
 function Recorder({ view, setView, setRec, setError }) {
   const canvasRef = useRef(null)
   const timerRef = useRef(null)
+  const floorRef = useRef(null)
   const eng = useRef(null)
   const [notice, setNotice] = useState(null) // { short: "M:SS" } when a take was too short
   const recording = view === 'recording'
@@ -82,6 +100,7 @@ function Recorder({ view, setView, setRec, setError }) {
     while (E.samples.length && E.samples[0].t < cutoff) E.samples.shift()
     if (canvasRef.current) draw(canvasRef.current, E.samples, now)
     if (timerRef.current) timerRef.current.textContent = fmtCenti(now)
+    floorNote(floorRef.current, now)
     E.raf = requestAnimationFrame(loop)
   }
 
@@ -153,6 +172,7 @@ function Recorder({ view, setView, setRec, setError }) {
     }
     setNotice(null); setError('')
     if (timerRef.current) timerRef.current.textContent = fmtCenti(0)
+    if (floorRef.current) floorNote(floorRef.current, 0)
     if (canvasRef.current) draw(canvasRef.current, [], 0)
     setView('idle')
   }
@@ -165,6 +185,7 @@ function Recorder({ view, setView, setRec, setError }) {
       </div>
       <div className="rec-wave"><canvas ref={canvasRef} className="rec-canvas"></canvas></div>
       <div className="rec-timer" ref={timerRef}>00:00.00</div>
+      {recording && <div className="fs12 tc" style={{ marginTop: '-8px', marginBottom: '8px' }} ref={floorRef}>4:30 short of the 4:30 floor minimum</div>}
       <Dial recording={recording} onClick={recording ? submit : start} />
 
       <AnimatePresence>

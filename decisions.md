@@ -126,3 +126,14 @@ Scope was exactly the three findings C1, H1, H2 from review_report.md — no MED
 - **Regression**: `tests/test_timezone.py` freezes `clock.now_utc` at 00:30 IST and 23:30 IST and asserts local day boundary, FSRS chaining (+2 local, not UTC-early), overdue-on-local-dates, ISO-week grace reset across a week boundary, stale-session auto-close, and backup naming by local date.
 
 - Migrations 014 (answers ledger + triggers) and 015 (timezone cutover). Files: new `backend/clock.py`, `backend/tests/test_concurrency.py`, `backend/tests/test_injection.py`, `backend/tests/test_timezone.py`. Definition of done met: the review's three reproductions re-run as ATTACK DEFEATED (evidence in review_report.md addendum), full suite 100 passed.
+
+## 2026-08-06 bug-fix session (false session lock)
+- **Reverses** the work-sessions session's "no GET-sessions endpoint by
+  design" call. Added `GET /api/sessions/current` (sweeps >6h stragglers,
+  returns the open `WorkSession` or null). Reason: the frontend's
+  `localStorage`-only session cache had no way to reconcile against backend
+  truth, so a server restart, crash, or the backend's own auto-close left a
+  permanent false "another session is running" lock with no recovery path —
+  a real bug, not a hypothetical. The original decision's rationale was
+  avoiding an unneeded surface, not a load-bearing constraint. Full detail
+  and verification in SESSION_LOG.md.

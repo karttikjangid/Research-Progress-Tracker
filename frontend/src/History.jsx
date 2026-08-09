@@ -140,9 +140,10 @@ export default function History() {
         })}
       </div>
 
+      <div style={{ marginTop: '24px' }}><Synthesis /></div>
       <div className="s-panels">
-        <Synthesis />
         <Glossary />
+        <VocabLedger />
       </div>
     </>
   )
@@ -238,6 +239,53 @@ function Glossary() {
         <button className="s-mini-btn" type="button" onClick={submit} disabled={busy || !paste.trim()}>{busy ? 'ADDING…' : 'ADD ROWS'}</button>
         {msg && <span className="s-hint" style={{ margin: 0 }}>{msg}</span>}
       </div>
+    </div>
+  )
+}
+
+// Vocabulary ledger: the sibling of the Glossary. Where the Glossary is
+// notation you've decoded, this is notation you keep getting WRONG — every
+// time the examiner catches an imprecise term it writes a vocab_flags row.
+// Grouped by (used → meant) with a repeat count, so a confusion you make five
+// times reads louder than a one-off. Read-only; the backend owns the writes.
+function VocabLedger() {
+  const [rows, setRows] = useState(undefined)
+  const [err, setErr] = useState('')
+  useEffect(() => { get('/api/vocab').then(setRows).catch((e) => setErr(e.message)) }, [])
+
+  return (
+    <div className="s-panel">
+      <div className="s-lab">VOCABULARY LEDGER · RECURRING IMPRECISION</div>
+      {err && <p className="s-err" style={{ margin: '12px 0 0' }}>{err}</p>}
+      {rows === undefined && !err && <p className="fs13" style={{ marginTop: '12px' }}>Loading…</p>}
+      {rows && rows.length === 0 && (
+        <p className="fs13" style={{ lineHeight: 1.65, margin: '12px 0 0' }}>
+          Nothing flagged yet. When the examiner catches an imprecise term, the confusion is recorded here and compounds — a term you keep getting wrong rises to the top.
+        </p>
+      )}
+      {rows && rows.length > 0 && (
+        <div className="mt12" style={{ maxHeight: '260px', overflowY: 'auto' }}>
+          {rows.map((v, i) => (
+            <div className="s-gent" key={i}>
+              <div className="fx jb" style={{ gap: '10px', alignItems: 'flex-start' }}>
+                <div style={{ lineHeight: 1.5 }}>
+                  <span className="fw7">{v.term_used}</span>
+                  <span className="s-muted"> used for </span>
+                  {v.term_meant}
+                </div>
+                <span className={`s-vs ${v.count > 1 ? 'dk-f' : ''}`}
+                  style={{ fontSize: '9.5px', padding: '1px 7px', flexShrink: 0 }}
+                  title={v.count > 1 ? `Flagged ${v.count} times — a recurring confusion` : 'Flagged once'}>
+                  ×{v.count}
+                </span>
+              </div>
+              <div className="s-hint" style={{ margin: '4px 0 0' }}>
+                most recent {shortDate(v.last_date)} · {v.sources.join(', ')}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

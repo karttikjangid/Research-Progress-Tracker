@@ -10,12 +10,15 @@ import { headerDate } from '../format'
 //   error        string — load/close error, if any
 //   rows         [{ label, verdict, tone }] — exhibit summary lines
 //   tickCount, tickTotal — free ticks done / total
+//   warnings     string[] — cold factual notices about what closing will record
+//                (open session, verbal MISSED, TASTELOG MISSING); each rendered
+//                in the same s-err style. One mechanism for all close-time flags.
 //   consequence  sentence describing what closing records
 //   closedNote   acknowledgement html shown once closed
 //   onKeepWorking, onConfirmClose, onDone — handlers
 export default function CloseFileModal({
   closed, loading = false, error = '', rows = [], tickCount = 0, tickTotal = 0,
-  consequence, closedNote, onKeepWorking, onConfirmClose, onDone,
+  warnings = [], consequence, closedNote, onKeepWorking, onConfirmClose, onDone,
 }) {
   return (
     <motion.div className="s-ovl"
@@ -43,6 +46,9 @@ export default function CloseFileModal({
                 <span className="dk-off">{tickCount} of {tickTotal} — carry no weight</span>
               </div>
             )}
+            {!loading && warnings.map((w, i) => (
+              <p className="s-err" key={i} style={{ lineHeight: 1.6, margin: '8px 0 0' }}>{w}</p>
+            ))}
             {!loading && (
               <p className="fs13" style={{ lineHeight: 1.6, margin: '8px 0 0' }}>{consequence}</p>
             )}

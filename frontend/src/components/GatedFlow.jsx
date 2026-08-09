@@ -33,6 +33,11 @@ export default function GatedFlow({ task, onDone }) {
 
           {!question && !result && (
             <>
+              {task.status === 'failed_once' && task.reason && (
+                <div className="s-err" style={{ marginBottom: '14px' }}>
+                  Previous attempt failed: {task.reason}
+                </div>
+              )}
               <div className="dk-req m0">Paste the artifact — the actual proof, diff, or decode notes. Not a topic name; the examiner weighs evidence only.</div>
               <textarea className="s-ta mt12" rows={9} value={artifact} onChange={(e) => setArtifact(e.target.value)} />
               <div className="fx gap12" style={{ marginTop: '16px' }}>
