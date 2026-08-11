@@ -35,15 +35,34 @@ export default function Today({ closed = false, streak, onStreakChange }) {
   const prevVerdicts = useRef({})
   const fanRef = useRef(null)
   const [fanW, setFanW] = useState(1400)
+  const [fanH, setFanH] = useState(432)
 
-  // Measure the fan so cards spread across the panel's real width.
+  // Measure the fan so cards spread across the panel's real width, and size its
+  // height to the tallest card. The cards are absolutely positioned, so a fixed
+  // height let a content-heavy card (resolved exhibit + reason) overflow and
+  // overlap the free-ticks strip below. Measure the real card bottoms instead.
   useEffect(() => {
     const el = fanRef.current
     if (!el) return
-    setFanW(el.clientWidth)
-    const ro = new ResizeObserver((es) => { for (const e of es) setFanW(e.contentRect.width) })
+    const measure = () => {
+      setFanW(el.clientWidth)
+      let bottom = 0
+      for (const card of el.querySelectorAll('.dk-card')) {
+        bottom = Math.max(bottom, card.offsetTop + card.offsetHeight)
+      }
+      // fall back to the design height until cards have laid out
+      setFanH(bottom ? Math.ceil(bottom + 12) : 432)
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
     ro.observe(el)
-    return () => ro.disconnect()
+    for (const card of el.querySelectorAll('.dk-card')) ro.observe(card)
+    // Custom fonts (Courier Prime / Oswald) can load after the first measure and
+    // reflow the text taller — re-measure once they're ready so the fan doesn't
+    // stay sized to the fallback-font height.
+    let cancelled = false
+    document.fonts?.ready.then(() => { if (!cancelled) measure() })
+    return () => { cancelled = true; ro.disconnect() }
   }, [data])
 
   // Guard against out-of-order responses: a slow earlier GET /api/tasks must not
@@ -258,7 +277,7 @@ export default function Today({ closed = false, streak, onStreakChange }) {
           </p>
         </div>
       ) : (
-        <div className="dk-fan" ref={fanRef} style={{ zIndex: focused != null ? 50 : 'auto' }}>
+        <div className="dk-fan" ref={fanRef} style={{ height: fanH, zIndex: focused != null ? 50 : 'auto' }}>
           {gated.map((t, i) => {
             const meta = statusMeta[t.status] || { label: t.status.toUpperCase(), verdict: null }
             const base = { left: leftOf(i), top: TOPS[i], rot: ROTS[i], z: ZS[i] }

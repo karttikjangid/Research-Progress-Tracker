@@ -881,3 +881,33 @@ can never collide. Verified at 1280px with a real gated exhibit filed: left quot
 occupied x 0–51, app started at 51; right quote 1229–1280, app ended at 1229; the
 exhibit card sat at x 118–453 well inside — no overlap. Removed the throwaway test
 task afterward. Files: `frontend/src/evidence.css` (2 lines).
+
+## Fix: free-ticks strip overlapping the exhibit fan
+- **Bug (reported):** the FREE TICKS strip overlapped the gated-exhibit cards.
+- **Root cause:** `.dk-fan` had a fixed `height: 432px`. The exhibit cards are
+  absolutely positioned, so they don't contribute to the fan's height. A
+  content-heavy card — a RESOLVED EXHIBIT A with the PASS stamp, ATTEMPTS row
+  and a full reason paragraph measures ~448px tall — overflowed the 432px box
+  and spilled onto the FREE TICKS strip that follows in normal flow. Any fixed
+  height fails here because card height is content-driven.
+- **Fix:** size the fan to its tallest card instead of a constant.
+  - `frontend/src/evidence.css`: `.dk-fan` `height: 432px` -> `min-height: 432px`
+    (keeps the design floor when cards are short).
+  - `frontend/src/Today.jsx`: extended the existing fan-measure effect to also
+    compute `max(offsetTop + offsetHeight)` across `.dk-card` and set it as the
+    fan's inline `height` (via new `fanH` state, +12px breathing room).
+    Recomputes on the ResizeObserver (width-driven text rewrap) and on
+    `document.fonts.ready` (Courier Prime / Oswald loading later and reflowing
+    text taller). Falls back to 432 until cards lay out.
+- **Why not the "ticks hover over the cards" idea:** layering the strip on top
+  would cover card text — pushing it below is the correct resolution. Rejected.
+- **Verified in the browser** with three real gated exhibits filed and EXHIBIT A
+  forced to the resolved/PASS state (tallest case). Measured live: tallest card
+  bottom 1104px abs, ticks strip top 1208px abs -> 104px gap, `overlap: false`.
+  Screenshotted: PASS stamp + ATTEMPTS + full reason all render, FREE TICKS sits
+  cleanly below. Note: a ResizeObserver-only manual DOM test showed no reflow,
+  but that's the headless pane throttling RO delivery while hidden — the real
+  app reflows through the `[data]` effect (which re-measures synchronously after
+  each content change) plus the fonts.ready pass, both confirmed. Removed the
+  throwaway test exhibits afterward (DB back to empty).
+- Files: `frontend/src/evidence.css` (1 line), `frontend/src/Today.jsx` (measure effect + fan style).

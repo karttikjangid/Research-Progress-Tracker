@@ -74,7 +74,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #93261f; outline-
 .dk-strip { background: #e6d9b8; color: #251f15; padding: 13px 20px; transform: rotate(.8deg); box-shadow: 0 6px 16px rgba(0, 0, 0, .35); max-width: 420px; }
 
 /* ---- fanned exhibit cards ---------------------------------------------- */
-.dk-fan { position: relative; height: 432px; margin-top: 30px; }
+.dk-fan { position: relative; min-height: 432px; margin-top: 30px; }
 .dk-card { position: absolute; width: 372px; background: #dbc99f; color: #241f15; border: 1px solid rgba(0, 0, 0, .28); box-shadow: 0 14px 28px rgba(0, 0, 0, .4); box-sizing: border-box; padding-bottom: 22px; }
 .dk-c1 { left: 0; top: 36px; transform: rotate(-3deg); }
 .dk-c2 { left: 316px; top: 2px; z-index: 3; background: #e7d9b6; }
