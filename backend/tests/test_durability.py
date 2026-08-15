@@ -1,5 +1,6 @@
 """Durability: crash recovery, idempotent close, catch-up, migrations, export."""
 import os
+import shutil
 import sqlite3
 
 from conftest import ARTIFACT, gated, make_webm
@@ -34,6 +35,60 @@ def test_transcription_crash_then_retry(client, mock_llm, tmp_path, app, monkeyp
     r2 = client.post(f"/api/recordings/{rid}/retry")
     assert r2.status_code == 200 and r2.json()["status"] == "done"
     assert client.post(f"/api/recordings/{rid}/viewed").status_code == 200
+
+
+def test_audit_survives_missing_local_directory_on_retry(client, mock_llm, tmp_path,
+                                                          app, monkeypatch):
+    """Render's free tier wipes everything under DATA_DIR that Litestream
+    doesn't replicate (it only replicates the SQLite file) on every restart —
+    so between an audit_failed upload and a later retry, the whole day
+    directory a recording was uploaded into can simply be gone, even though
+    transcript_text (a DB column) survived fine. A retry must still succeed
+    and durably persist the result, and the recording must still be markable
+    as viewed afterward: it must not crash writing the now-homeless local
+    convenience copy, and 'viewed' must not gate on that local file existing.
+    Recording 3's audit_failed loop, 2026-08-15."""
+    def fail_once(text, **kw):
+        raise app.llm.LLMError(
+            "evaluator unreachable: ReadTimeout (after 90.0s, budget 90s)")
+    monkeypatch.setattr(app.transcribe, "transcribe", lambda p: "um so basically svd")
+    monkeypatch.setattr(app.llm, "audit_transcript", fail_once)
+    r = _upload(client, tmp_path)
+    assert r.status_code == 503
+    rid = int(r.headers["X-Recording-Id"])
+    assert _rec_status(client, rid) == "audit_failed"
+
+    # Simulate the restart: delete the whole local day directory (audio +
+    # transcript + audit files) — the DB's transcript_text is untouched,
+    # exactly like a real Litestream restore of just the SQLite file.
+    rec = client.get(f"/api/recordings/{rid}").json()
+    day_dir = os.path.dirname(rec["audit_path"])
+    assert os.path.isdir(day_dir)
+    shutil.rmtree(day_dir)
+
+    monkeypatch.setattr(app.llm, "audit_transcript",
+                        lambda text, **kw: "AUDIT: solid work, tighten the close")
+    r2 = client.post(f"/api/recordings/{rid}/retry")
+    assert r2.status_code == 200 and r2.json()["status"] == "done"
+    assert _rec_status(client, rid) == "done"
+
+    got = client.get(f"/api/recordings/{rid}").json()
+    assert got["audit"] and "AUDIT" in got["audit"]  # durable text survived
+    # 'viewed' is gated on audit_text, not the (possibly still-missing) file.
+    assert client.post(f"/api/recordings/{rid}/viewed").status_code == 200
+
+
+def test_write_local_logs_and_never_raises_on_oserror(app, tmp_path):
+    """Unit-level guarantee behind the test above: _write_local is a
+    best-effort convenience copy and must swallow any OSError (missing/
+    unwritable parent directory) rather than ever propagating it — that
+    propagation is exactly what turned a successful, expensive LLM result
+    into a lost 500 in the original incident."""
+    from pathlib import Path
+    blocker = tmp_path / "not_a_dir"
+    blocker.write_text("a file sitting where a directory is expected")
+    bad_path = blocker / "sub" / "audit.md"
+    app._write_local(Path(bad_path), "some audit text", 999, "audit")  # must not raise
 
 
 def test_failed_upload_exposes_recording_id_header(client, mock_llm, tmp_path, app,

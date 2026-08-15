@@ -5,7 +5,6 @@ max-3-gated-tasks rule all live HERE, so no route (or future bug in one)
 can complete a task illegally. Routes translate GamingError → HTTP status.
 """
 import os
-from pathlib import Path
 
 from sqlalchemy import (Boolean, Float, Integer, String, Text, create_engine,
                         event)
@@ -195,7 +194,13 @@ class Recording(Base):
     def _v_viewed(self, _k, new):
         if self.audit_viewed and not new:
             raise ImmutableField("audit_viewed cannot be revoked")
-        if new and not (self.audit_path and Path(self.audit_path).exists()):
+        # audit_text (DB column, Litestream-replicated) is the durability
+        # boundary — NOT audit_path's file on local disk, which Render's free
+        # tier can wipe on any restart. This predates migration 017 (which
+        # added audit_text as the durable copy) and was never updated to
+        # match: a perfectly real, saved audit could 409 here forever if its
+        # local file happened to not survive a restart.
+        if new and not self.audit_text:
             raise IllegalTransition("audit cannot be marked viewed before it exists")
         return new
 

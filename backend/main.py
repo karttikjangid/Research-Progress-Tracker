@@ -509,6 +509,25 @@ def _recording_dict(r: Recording) -> dict:
     return d
 
 
+def _write_local(path: Path, text: str, rec_id: int, kind: str) -> None:
+    """Best-effort local convenience copy — NEVER the durability boundary. Must
+    be called AFTER the DB column is already committed, and must never raise:
+    Render's free tier wipes everything under DATA_DIR that Litestream doesn't
+    replicate (it only replicates the SQLite file) on every restart, so the day
+    directory a recording was uploaded into can simply be gone by the time a
+    retry runs. Recording 3's audit_failed loop (2026-08-15) was exactly this
+    bug the WRONG way around: an unguarded write_text() to a since-vanished
+    directory crashed the request and threw away an already-completed,
+    expensive LLM result that had never made it to the DB yet."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    except OSError as e:
+        infra.log.warning("recording %s: local %s file not written (%s) — "
+                          "harmless, the DB column is the durable copy",
+                          rec_id, kind, e)
+
+
 def _process(r: Recording, s) -> dict:
     """Transcribe + audit whatever is still missing, then mark done.
 
@@ -521,7 +540,9 @@ def _process(r: Recording, s) -> dict:
     between steps can't silently lose already-completed work: a later retry
     picks up from whichever text columns are already populated. The on-disk
     .txt/.md files are still written as a local convenience but nothing here
-    depends on them existing.
+    depends on them existing — which means the DB write must happen BEFORE the
+    local write, not after (see _write_local's docstring for the incident that
+    happens when this order is reversed).
     """
     tp, ap = Path(r.transcript_path), Path(r.audit_path)
     if not r.transcript_text:
@@ -540,9 +561,9 @@ def _process(r: Recording, s) -> dict:
             raise HTTPException(400, "transcript came back empty — no speech "
                                 f"detected; retry with /api/recordings/{r.id}/retry",
                                 headers={"X-Recording-Id": str(r.id)})
-        tp.write_text(text)
         r.transcript_text = text
         s.commit()
+        _write_local(tp, text, r.id, "transcript")
     if not r.audit_text:
         if r.wpm is None:  # deterministic stats before the LLM, survive retries
             st = transcribe.compute_stats(r.transcript_text, r.duration_sec)
@@ -565,8 +586,9 @@ def _process(r: Recording, s) -> dict:
             infra.log.error("recording %s: audit failed: %s", r.id, e)
             raise HTTPException(503, f"{e} — POST /api/recordings/{r.id}/retry",
                                 headers={"X-Recording-Id": str(r.id)})
-        ap.write_text(audit)
         r.audit_text = audit
+        s.commit()
+        _write_local(ap, audit, r.id, "audit")
     r.status = "done"
     s.commit()
     return _recording_dict(r)
@@ -629,7 +651,7 @@ def mark_viewed(rec_id: int, s=Depends(db)):
     r = s.get(Recording, rec_id)
     if not r:
         raise HTTPException(404, "no such recording")
-    r.audit_viewed = True  # db layer 409s if the audit file doesn't exist
+    r.audit_viewed = True  # db layer 409s if audit_text isn't populated yet
     s.commit()
     return r.as_dict()
 
