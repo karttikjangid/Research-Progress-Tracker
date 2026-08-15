@@ -18,6 +18,13 @@ import db as _db
 BASE_URL = "https://integrate.api.nvidia.com/v1"
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
 TIMEOUT = 30
+# transcript_audit/weekly_synthesis ask for 900-1200 output tokens — 4-6x the
+# 200-300 the gated-flow calls (question_gen/answer_eval) request. The flat 30s
+# TIMEOUT was being applied to those too, and since it's a hard per-attempt
+# ceiling, retrying with the SAME 30s budget never fixes "the model needed more
+# time" — it just fails identically every time (recording 3's audit_failed loop,
+# 2026-08-15). Give the long-output purposes real room to finish.
+LONG_TIMEOUT = 90
 RETRIES = 2  # extra attempts after the first, backoff 1s then 2s
 
 VERDICT_RE = re.compile(r"^VERDICT:\s*(PASS|FAIL)\s*[—–-]+\s*(.+)$", re.M)
@@ -96,7 +103,7 @@ def _call(purpose: str, task_id: int | None, system: str, user: str,
     return raw
 
 
-def _chat(system: str, user: str, max_tokens: int = 1024) -> str:
+def _chat(system: str, user: str, max_tokens: int = 1024, timeout: int = TIMEOUT) -> str:
     key = os.getenv("NVIDIA_API_KEY")
     if not key:
         raise LLMError("NVIDIA_API_KEY is not set in .env")
@@ -105,6 +112,7 @@ def _chat(system: str, user: str, max_tokens: int = 1024) -> str:
     for attempt in range(RETRIES + 1):
         if attempt:
             time.sleep(attempt)  # 1s, 2s
+        t0 = time.monotonic()
         try:
             r = requests.post(
                 f"{BASE_URL}/chat/completions",
@@ -112,10 +120,16 @@ def _chat(system: str, user: str, max_tokens: int = 1024) -> str:
                 json={"model": model, "temperature": 0, "max_tokens": max_tokens,
                       "messages": [{"role": "system", "content": system},
                                    {"role": "user", "content": user}]},
-                timeout=TIMEOUT,
+                timeout=timeout,
             )
         except requests.RequestException as e:
-            last = f"evaluator unreachable: {e.__class__.__name__}"
+            # Elapsed time logged alongside the declared budget: a failure at
+            # ~2s vs ~timeout-s tells you whether the network never connected
+            # or the model genuinely ran out of time — otherwise a "ReadTimeout"
+            # is a mystery when it fires way faster than the timeout implies.
+            elapsed = time.monotonic() - t0
+            last = (f"evaluator unreachable: {e.__class__.__name__} "
+                    f"(after {elapsed:.1f}s, budget {timeout}s)")
             continue
         if r.status_code == 429 or r.status_code >= 500:
             last = f"evaluator HTTP {r.status_code}"
@@ -203,7 +217,7 @@ def audit_transcript(transcript: str, stats: dict | None = None,
                  "is used INCORRECTLY, flag it with a `VOCAB_FLAG: <used> -> <meant>` "
                  "line:\n" + "\n".join(f"- {g}" for g in glossary))
     system = _system("transcript_audit.txt")
-    raw = _call("transcript_audit", None, system, user, max_tokens=1200)
+    raw = _call("transcript_audit", None, system, user, max_tokens=1200, timeout=LONG_TIMEOUT)
     _record("transcript_audit", None, system, user, raw)
     return raw
 
@@ -212,6 +226,6 @@ def weekly_synthesis(week_markdown: str) -> str:
     """Turn the week's export markdown into a harsh, data-cited synthesis."""
     system = _system("weekly_synthesis.txt")
     user = f"This week's raw log:\n\n{_wrap(week_markdown)}"
-    raw = _call("weekly_synthesis", None, system, user, max_tokens=900)
+    raw = _call("weekly_synthesis", None, system, user, max_tokens=900, timeout=LONG_TIMEOUT)
     _record("weekly_synthesis", None, system, user, raw)
     return raw
