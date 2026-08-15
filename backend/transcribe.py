@@ -130,7 +130,18 @@ def detect_silences(path: str, noise_db: float = -30.0,
 _RIVA_URI = "grpc.nvcf.nvidia.com:443"
 _RIVA_FUNCTION_ID = "b702f636-f60c-4a3d-a6f4-f3568c13bd7d"
 _RIVA_SAMPLE_RATE = 16000  # mono 16-bit PCM we transcode to below
-_RIVA_TIMEOUT = 120        # hard client deadline per attempt (a 7–8 min take is well under)
+# NVIDIA's own published RTFX (real-time factor) for offline Whisper-Large-v3 is
+# 60-90x on dedicated A100/H100 (docs.nvidia.com/nim/speech ASR NIM performance
+# page). At RTFX 60, even an 8-minute recording needs ~8s of actual compute, so
+# 120s on the FIRST attempt is already 15x+ headroom — a call still running
+# anywhere near that ceiling is a real anomaly (queueing/cold-start/outage on
+# the shared endpoint), not normal variance. Retries get a much shorter budget:
+# if attempt 1 needed the full 120s and still failed, giving attempts 2-3 the
+# SAME long budget just triples a multi-minute wait for a request unlikely to
+# succeed — the same mistake llm.py's TIMEOUT/LONG_TIMEOUT split fixed after
+# recording 3's audit kept timing out identically on every retry (2026-08-15).
+_RIVA_TIMEOUT = 120         # first attempt: generous, evidence-based ceiling
+_RIVA_RETRY_TIMEOUT = 30    # retries: bound the worst case instead of re-waiting as long
 _RIVA_RETRIES = 2          # extra attempts on transient gRPC errors, backoff 1s then 2s
 _riva_asr = None  # cached ASRService after the first successful connect
 
@@ -172,7 +183,12 @@ def _offline_recognize(data: bytes, config):
     this a stalled NVCF connection blocks the (synchronous) upload request
     forever; a single transient blip would otherwise burn the recording straight
     to transcription_failed. Non-transient errors (bad auth, invalid arg) raise
-    at once — retrying won't help."""
+    at once — retrying won't help.
+
+    Only the first attempt gets the full _RIVA_TIMEOUT; retries use the shorter
+    _RIVA_RETRY_TIMEOUT (see its comment — a first attempt that needed anywhere
+    near 120s is already an anomaly, not something worth re-waiting 120s for
+    twice more)."""
     import time
 
     import grpc
@@ -183,11 +199,14 @@ def _offline_recognize(data: bytes, config):
     for attempt in range(_RIVA_RETRIES + 1):
         if attempt:
             time.sleep(attempt)  # 1s, 2s
+        budget = _RIVA_TIMEOUT if attempt == 0 else _RIVA_RETRY_TIMEOUT
+        t0 = time.monotonic()
         try:
             future = svc.offline_recognize(data, config, future=True)
-            return future.result(timeout=_RIVA_TIMEOUT)
+            return future.result(timeout=budget)
         except grpc.FutureTimeoutError:
-            last = f"Riva ASR timed out after {_RIVA_TIMEOUT}s"
+            elapsed = time.monotonic() - t0
+            last = f"Riva ASR timed out after {elapsed:.1f}s (budget {budget}s)"
         except grpc.RpcError as e:
             code = e.code()
             if code not in transient:
