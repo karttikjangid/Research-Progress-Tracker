@@ -50,12 +50,38 @@ def test_invalid_kind_and_planned_422(client, app):
 
 # ---------- sessions: auto-close ----------
 
-def test_open_session_auto_closed_on_startup(client, app):
+def test_recent_open_session_survives_startup(client, app):
+    """A struggle timer restarted mid-session — a Render redeploy, or the free
+    tier's 15-min idle spin-down waking back up, which the timer's own '20 min
+    of not touching the site' usage pattern triggers almost every time — must
+    NOT be killed just because the process restarted. Only genuinely stale
+    (SESSION_MAX_HOURS+) sessions are swept at startup now."""
     at(app, "2026-07-13T09:00:00+00:00")
     sid = client.post("/api/sessions/start",
                       json={"kind": "struggle_timer", "planned_minutes": 20}).json()["id"]
-    at(app, "2026-07-13T09:05:00+00:00")
+    at(app, "2026-07-13T09:05:00+00:00")  # restart 5 minutes in — nowhere near stale
     app._close_orphan_sessions()  # simulates the next server startup
+    from db import SessionLocal, WorkSession
+    s = SessionLocal()
+    sess = s.get(WorkSession, sid)
+    got = (sess.aborted, bool(sess.ended_at))
+    s.close()
+    assert got == (False, False)  # still open, untouched by the restart
+
+    # ...and it still ends correctly later, with the real elapsed time honored.
+    at(app, "2026-07-13T09:21:00+00:00")
+    out = client.post(f"/api/sessions/{sid}/end").json()
+    assert out["actual_minutes"] == 21.0 and out["aborted"] is False
+
+
+def test_genuinely_stale_session_still_auto_closed_on_startup(client, app):
+    """The fix only protects RECENT sessions — a session that's been open for
+    hours (crashed tab, forgotten, never coming back) is still swept."""
+    at(app, "2026-07-13T02:00:00+00:00")
+    sid = client.post("/api/sessions/start",
+                      json={"kind": "struggle_timer", "planned_minutes": 20}).json()["id"]
+    at(app, "2026-07-13T09:00:01+00:00")  # 7h later — genuinely stale
+    app._close_orphan_sessions()
     from db import SessionLocal, WorkSession
     s = SessionLocal()
     sess = s.get(WorkSession, sid)

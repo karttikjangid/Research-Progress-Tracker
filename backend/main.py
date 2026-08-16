@@ -102,7 +102,7 @@ def healthz():
 
 def _daily_maintenance():
     """First-startup-of-the-day backup + catch-up close of neglected days."""
-    _close_orphan_sessions()  # any session still open across a restart is dead
+    _close_orphan_sessions()  # only genuinely stale (SESSION_MAX_HOURS+) sessions
     if not (infra.BACKUP_DIR / today()).exists():
         infra.backup(DB_PATH, today())
     _catch_up()
@@ -711,8 +711,12 @@ def _end_session(sess: WorkSession, when: dt.datetime, aborted=False, trigger=""
 
 
 def _sweep_open_sessions(s, close_all: bool):
-    """Auto-abort open sessions: every one at startup (close_all), or any that
-    has outlived SESSION_MAX_HOURS during a run."""
+    """Auto-abort open sessions: every one regardless of age (close_all), or
+    only ones that have outlived SESSION_MAX_HOURS.
+
+    close_all=True is no longer used anywhere (see _close_orphan_sessions) —
+    kept as a param, not removed, so a future caller has to make a deliberate
+    choice rather than silently inheriting today's default."""
     now = _now()
     for sess in s.query(WorkSession).filter(WorkSession.ended_at == ""):
         age_h = (now - dt.datetime.fromisoformat(sess.started_at)).total_seconds() / 3600
@@ -723,9 +727,26 @@ def _sweep_open_sessions(s, close_all: bool):
 
 
 def _close_orphan_sessions():
+    """Startup sweep: only sessions already stale (SESSION_MAX_HOURS+) when the
+    process died are auto-aborted — NOT every open session unconditionally.
+
+    Used to be close_all=True (kill everything on every restart), which meant
+    ANY server restart mid-session — a Render redeploy, or the free tier's
+    15-minute idle spin-down waking back up on the next request — instantly
+    and permanently killed a struggle timer no matter how close to done it
+    was. That collides almost every time with how the timer is actually meant
+    to be used: 20 minutes of NOT touching the site while doing the work,
+    which is exactly the inactivity pattern that triggers a free-tier spin-
+    down. started_at survives a restart fine (Litestream replicates the DB);
+    the session just needs to not be preemptively murdered for existing.
+    The original motivation for close_all=True — a stale localStorage lock
+    showing 'session running' after a crash — is now solved differently, by
+    the frontend reconciling against GET /api/sessions/current on mount
+    (see Today.jsx) rather than trusting a client-side cache, so close_all
+    is no longer needed to keep the UI honest."""
     s = SessionLocal()
     try:
-        _sweep_open_sessions(s, close_all=True)
+        _sweep_open_sessions(s, close_all=False)
     finally:
         s.close()
 
