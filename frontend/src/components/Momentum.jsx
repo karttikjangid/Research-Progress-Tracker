@@ -13,6 +13,11 @@ import { motion, useReducedMotion } from 'framer-motion'
 const MILESTONES = [3, 7, 14, 30, 60, 100, 180]
 const MILE_NAME = { 3: 'find the groove', 7: 'first full week', 14: 'two weeks', 30: 'a month', 60: 'two months', 100: 'the hundred', 180: 'the whole run' }
 const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+const CELL_LABEL = {
+  clean: 'clean day', broken: 'broken — streak reset',
+  grace: 'missed, but grace token saved the streak',
+  open: 'logged, not closed', none: 'no file', future: '',
+}
 
 const isoLocal = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -34,7 +39,11 @@ function buildGrid(history, weeks) {
       if (iso > todayISO) state = 'future'
       else {
         const d = map[iso]
-        if (d) state = d.streak_day ? 'clean' : d.summary_line ? 'broken' : 'open'
+        if (d) {
+          state = d.streak_day ? 'clean'
+            : d.grace_used ? 'grace'
+            : d.summary_line ? 'broken' : 'open'
+        }
       }
       col.push({ iso, state, today: iso === todayISO, dow: DOW[cur.getDay()] })
     }
@@ -113,7 +122,7 @@ export default function Momentum({ streak, closed = false, history }) {
               {col.map((cell) => (
                 <motion.div key={cell.iso}
                   className={`mo-cell ${cell.state}${cell.today ? ' today' : ''}`}
-                  title={`${cell.iso} — ${cell.state}`}
+                  title={cell.state === 'future' ? '' : `${cell.iso} — ${CELL_LABEL[cell.state]}`}
                   initial={reduce ? false : { opacity: 0, scale: 0.4 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={reduce ? { duration: 0 } : { type: 'spring', bounce: 0, duration: 0.4, delay: Math.min(0.5, ci * 0.03) }} />
@@ -123,6 +132,7 @@ export default function Momentum({ streak, closed = false, history }) {
         </div>
         <div className="mo-legend">
           <span><i className="mo-cell clean" /> clean day</span>
+          <span><i className="mo-cell grace" /> grace-saved</span>
           <span><i className="mo-cell broken" /> broken</span>
           <span><i className="mo-cell none" /> no file</span>
         </div>

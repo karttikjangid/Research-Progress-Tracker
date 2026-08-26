@@ -21,7 +21,7 @@ services:
       - key: SUPABASE_S3_REGION
         value: ap-southeast-1
       - key: EVAL_MODEL
-        value: meta/llama-3.1-70b-instruct
+        value: moonshotai/kimi-k3
       # secrets — set these in the dashboard (never committed)
       - key: GATEKEEPER_PASSWORD
         sync: false

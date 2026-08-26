@@ -1434,6 +1434,7 @@ def history(s=Depends(db)):
                     "reflection": reflection,
                     "summary_line": log.summary_line if log else None,
                     "streak_day": bool(log.streak_day) if log else None,
+                    "grace_used": bool(log.grace_used) if log else None,
                     "current_streak": log.current_streak if log else None,
                     "focus_minutes": focus_minutes})
     return out

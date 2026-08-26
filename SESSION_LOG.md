@@ -974,3 +974,63 @@ task afterward. Files: `frontend/src/evidence.css` (2 lines).
   session.
 - Files: `backend/llm.py` (`EVAL_MODEL` default, `TIMEOUT`, explanatory
   comments only — no other logic touched).
+
+## Follow-up: `render.yaml` overrode the EVAL_MODEL fix
+- **Reported:** redeployed after the llm.py fix above, error was identical.
+- **Root cause:** `render.yaml` hardcoded `EVAL_MODEL: meta/llama-3.1-70b-
+  instruct` as an env var. `_chat()` does
+  `os.getenv("EVAL_MODEL", "moonshotai/kimi-k3")` — the env var always wins
+  over the code default, so the code fix was never actually reachable on
+  Render. Fixed `render.yaml` to `moonshotai/kimi-k3`.
+- **This alone may not fix the live service.** `render.yaml`'s own comment
+  says this service was likely created by hand in the dashboard rather than
+  via a Blueprint sync, in which case editing the committed `render.yaml`
+  does not retroactively update the live env var — Render only reads it at
+  Blueprint creation/sync time. Told the user to check the dashboard's
+  Environment tab directly and update/delete `EVAL_MODEL` there if still set
+  to the dead model.
+- Also trimmed the inline model-selection comments in `llm.py` down to one
+  line each (reported as noise) — full reasoning stays in this log instead
+  of duplicated in code. Re-verified through the real `evaluate_answer()`
+  path after the trim: correct FAIL verdict on a restate-not-explain answer.
+- Files: `render.yaml` (1 line), `backend/llm.py` (comments only).
+
+## Bug: streak survives a "broken" day with zero UI explanation why (FIXED)
+- **Reported:** streak showed "3 days running" despite the LAST 10 WEEKS grid
+  showing a red "broken" cell in between two clean (teal) days — looked like
+  the counter was wrong.
+- **Not a counter bug.** `backend/main.py` `_streak_values` implements a
+  documented weekly grace token (DECISIONS.md 2026-07-11: "one token per ISO
+  week... First non-streak day of a week consumes it, streak survives at its
+  current value"). Confirmed by inserting a real clean/clean/miss/clean
+  day_log sequence into the local dev DB and reading it back via
+  `GET /api/history`: the miss day correctly had `grace_used: true` and
+  `current_streak` correctly held instead of resetting.
+- **The actual bug: the UI couldn't express this.** `GET /api/history`
+  (`backend/main.py`) never included `grace_used` in its per-day dict at all,
+  and `Momentum.jsx`'s `buildGrid()` colored any `!streak_day` cell "broken"
+  (red) unconditionally — a grace-saved day and a real streak-breaking day
+  were visually identical, and the tooltip just said "broken" either way.
+  There was no way for the user to tell, from the UI alone, why a red day
+  didn't reset the count.
+- **Fix:**
+  - `backend/main.py` `/api/history`: added `"grace_used": bool(log.grace_used)
+    if log else None` to the per-day response.
+  - `frontend/src/components/Momentum.jsx`: `buildGrid()` now yields a third
+    cell state, `'grace'`, when `streak_day` is false but `grace_used` is
+    true (checked before falling through to `'broken'`). Added a
+    `CELL_LABEL` map so tooltips read e.g. "missed, but grace token saved the
+    streak" instead of a bare state name. Added a "grace-saved" swatch to the
+    legend.
+  - `frontend/src/evidence.css`: `.mo-cell.grace` uses `#c9a24e` — the same
+    amber already used for the roadmap seal and milestone-progress fill
+    elsewhere in this design system, rather than inventing a new accent color.
+- **Verified in the browser, not just the API:** inserted a real 4-day
+  clean/clean/grace-miss/clean `day_log` sequence into the local dev DB
+  (2026-08-17 through 2026-08-20, matching the reported shape), loaded the
+  Today screen, and confirmed the LAST 10 WEEKS grid renders that day as the
+  distinct amber cell with "grace-saved" in the legend — screenshotted.
+  Removed the test rows afterward (DB back to its prior state).
+- Files: `backend/main.py` (1 field added), `frontend/src/components/
+  Momentum.jsx` (grid state + legend + tooltip), `frontend/src/evidence.css`
+  (1 rule).

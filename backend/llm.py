@@ -17,11 +17,8 @@ import db as _db
 
 BASE_URL = "https://integrate.api.nvidia.com/v1"
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
-# moonshotai/kimi-k3 (current EVAL_MODEL default, see below) is a reasoning
-# model: live probes of question_gen/answer_eval-shaped prompts measured
-# ~11-15s even for a trivial one-line question, before any real artifact/
-# transcript content is added. The old 30s left too little margin for a
-# harder real prompt plus network variance, so it's bumped to 45s.
+# kimi-k3 is a reasoning model — trivial prompts alone measured ~11-15s in
+# testing, so 30s left too little margin for a real prompt.
 TIMEOUT = 45
 # transcript_audit/weekly_synthesis ask for 900-1200 output tokens — 4-6x the
 # 200-300 the gated-flow calls (question_gen/answer_eval) request. The flat 30s
@@ -112,20 +109,9 @@ def _chat(system: str, user: str, max_tokens: int = 1024, timeout: int = TIMEOUT
     key = os.getenv("NVIDIA_API_KEY")
     if not key:
         raise LLMError("NVIDIA_API_KEY is not set in .env")
-    # meta/llama-3.1-70b-instruct hit NVIDIA's EOL on 2026-08-25 (HTTP 410
-    # Gone). Replacement picked by actually probing this account's NVIDIA_API_KEY
-    # against /v1/chat/completions, not just /v1/models (the models list includes
-    # entries the key isn't entitled to call — e.g. nvidia/llama-3.1-nemotron-70b-
-    # instruct, mistralai/mistral-large-2-instruct, and moonshotai/kimi-k2.6 all
-    # 404 "Function ... Not found for account" despite being listed). Of the
-    # candidates that actually returned 200, nvidia/nemotron-3-super-120b-a12b
-    # hit finish_reason="length" at max_tokens=200 — its hidden reasoning eats
-    # most of the budget, risking a truncated (and thus UNPARSEABLE-yielding)
-    # verdict line on harder answers. moonshotai/kimi-k3 stayed well under
-    # budget (finish_reason="stop"), correctly failed a FAIL-case and a
-    # prompt-injection attempt in live testing, and its chain-of-thought lands
-    # in a separate reasoning_content field so the existing `["content"]`
-    # extraction below stays clean. See SESSION_LOG.md for the full probe.
+    # meta/llama-3.1-70b-instruct hit NVIDIA's EOL 2026-08-25. Replaced with
+    # moonshotai/kimi-k3 — verified against this account's actual entitlements,
+    # not just the /v1/models listing. See SESSION_LOG.md for the model probe.
     model = os.getenv("EVAL_MODEL", "moonshotai/kimi-k3")
     last = None
     for attempt in range(RETRIES + 1):

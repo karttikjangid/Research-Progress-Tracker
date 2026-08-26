@@ -530,6 +530,7 @@ body::after {
 .mo-cell { width: 13px; height: 13px; border-radius: 2px; background: rgba(36, 31, 21, .1); box-sizing: border-box; }
 .mo-cell.clean { background: #2f6b58; }
 .mo-cell.broken { background: #93261f; opacity: .85; }
+.mo-cell.grace { background: #c9a24e; opacity: .85; }
 .mo-cell.open { background: rgba(36, 31, 21, .28); }
 .mo-cell.none { background: rgba(36, 31, 21, .09); }
 .mo-cell.future { background: transparent; }
