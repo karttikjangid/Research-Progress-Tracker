@@ -1,6 +1,6 @@
 """NVIDIA NIM client. Fails CLOSED: any doubt raises LLMError, never a verdict.
 
-45s timeout, 2 retries with backoff on network errors / 429 / 5xx (a 4xx like
+120s timeout, 2 retries with backoff on network errors / 429 / 5xx (a 4xx like
 bad auth is not retried). An evaluator reply that doesn't match the strict
 verdict format is an error — there is no code path from garbage output to PASS.
 """
@@ -17,16 +17,18 @@ import db as _db
 
 BASE_URL = "https://integrate.api.nvidia.com/v1"
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
-# kimi-k3 is a reasoning model — trivial prompts alone measured ~11-15s in
-# testing, so 30s left too little margin for a real prompt.
-TIMEOUT = 45
-# transcript_audit/weekly_synthesis ask for 900-1200 output tokens — 4-6x the
-# 200-300 the gated-flow calls (question_gen/answer_eval) request. The flat 30s
-# TIMEOUT was being applied to those too, and since it's a hard per-attempt
-# ceiling, retrying with the SAME 30s budget never fixes "the model needed more
-# time" — it just fails identically every time (recording 3's audit_failed loop,
-# 2026-08-15). Give the long-output purposes real room to finish.
-LONG_TIMEOUT = 90
+# kimi-k3 latency has gotten much worse since the 45s figure was set (that was
+# based on an ~11-15s trivial-prompt probe on 2026-08-15). Live probes on
+# 2026-08-29 measured 61-90s for a REAL question_gen/answer_eval-shaped
+# prompt, and even a one-word "hi" reply took 61-70s (once >90s outright) —
+# this is now inherent to the hosted model/endpoint, not prompt complexity.
+# 45s was firing "evaluator unreachable: ReadTimeout" on calls that would
+# have succeeded given more time. See SESSION_LOG.md for the raw probe data.
+TIMEOUT = 120
+# transcript_audit/weekly_synthesis ask for 900-1200 output tokens — 2x the
+# 500-600 the gated-flow calls (question_gen/answer_eval) request, on top of
+# the same increased base latency above. Bumped proportionally.
+LONG_TIMEOUT = 180
 RETRIES = 2  # extra attempts after the first, backoff 1s then 2s
 
 VERDICT_RE = re.compile(r"^VERDICT:\s*(PASS|FAIL)\s*[—–-]+\s*(.+)$", re.M)
@@ -142,9 +144,14 @@ def _chat(system: str, user: str, max_tokens: int = 1024, timeout: int = TIMEOUT
         if r.status_code != 200:  # 4xx: retrying won't help
             raise LLMError(f"evaluator HTTP {r.status_code}: {r.text[:200]}")
         try:
-            text = r.json()["choices"][0]["message"]["content"].strip()
+            content = r.json()["choices"][0]["message"]["content"]
         except (KeyError, IndexError, ValueError):
             raise LLMError("evaluator returned an unexpected response shape")
+        # kimi-k3 puts its chain-of-thought in a separate reasoning_content
+        # field and can exhaust max_tokens on reasoning alone, leaving this
+        # field null (finish_reason "length") rather than an empty string.
+        # `None.strip()` would crash uncaught here instead of failing closed.
+        text = (content or "").strip()
         if not text:
             raise LLMError("evaluator returned an empty response")
         return text
@@ -174,7 +181,7 @@ def generate_question(artifact: str, task_id: int | None = None,
                  "definitions; build a question on top of them:\n"
                  + "\n".join(f"- {g}" for g in glossary))
     system = _system("question_gen.txt")
-    raw = _call("question_gen", task_id, system, user, max_tokens=300)
+    raw = _call("question_gen", task_id, system, user, max_tokens=600)
     _record("question_gen", task_id, system, user, raw)
     return raw
 
@@ -190,7 +197,7 @@ def evaluate_answer(artifact: str, question: str, answer: str,
         user += ("\n\nThis is an independent second grading. Grade from scratch, "
                  "harshly, ignoring any presumption that this answer once passed.")
     system = _system("answer_eval.txt")
-    raw = _call(purpose, task_id, system, user, max_tokens=200)
+    raw = _call(purpose, task_id, system, user, max_tokens=500)
     # Fail closed: the response must contain EXACTLY ONE verdict line. Zero
     # (garbage) or two-or-more (an injected/echoed fake verdict alongside the
     # real one) is unparseable — never silently pick the first.

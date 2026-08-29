@@ -1034,3 +1034,65 @@ task afterward. Files: `frontend/src/evidence.css` (2 lines).
 - Files: `backend/main.py` (1 field added), `frontend/src/components/
   Momentum.jsx` (grid state + legend + tooltip), `frontend/src/evidence.css`
   (1 rule).
+
+## Bug: gated-task evaluation timing out ("evaluator unreachable: ReadTimeout") (FIXED — root cause was NOT the API key)
+- **Reported:** user asked me to check whether `NVIDIA_API_KEY` was working
+  for gated-task evaluation, and separately hit `evaluator unreachable:
+  ReadTimeout (after 45.1s, budget 45s)` live.
+- **Key itself is fine.** Confirmed `NVIDIA_API_KEY` loads from `.env` (70
+  chars) and authenticates: `GET /v1/models` → 200, and multiple direct
+  `POST /v1/chat/completions` calls to `moonshotai/kimi-k3` succeeded with
+  that key. (Briefly saw a string of `401 Unauthorized` responses mid-probe —
+  traced that to my own test script resolving a relative `.env` path against
+  the wrong cwd and sending `Authorization: Bearer None`; not a real account
+  issue. Re-ran with the correct path and 401s disappeared.)
+- **Real root cause: kimi-k3's live latency is now far above what `TIMEOUT`
+  (45s) assumed.** Direct probes on 2026-08-29 against the real endpoint:
+  a realistic answer_eval-shaped prompt took 61.2s and 64.7s on two runs; a
+  trivial one-word "hi" reply took 61-70s on three runs and, once, exceeded
+  90s and timed out outright. This is far past the ~11-15s trivial-prompt
+  baseline the 45s figure (bumped from 30s) was set from on 2026-08-15 —
+  either the hosted model has gotten slower/more loaded since, or that
+  baseline never generalized to real prompt shapes. Tried
+  `chat_template_kwargs: {thinking: false}` to skip the reasoning trace and
+  cut latency; NVIDIA's endpoint didn't error on the field but also didn't
+  get any faster (still hit the 90s cap), so this isn't a param NVIDIA
+  honors for this model — didn't pursue it further.
+- **Second, related bug found while investigating:** `answer_eval`
+  (`max_tokens=200`) and `question_gen` (`max_tokens=300`) were tight enough
+  that kimi-k3's `reasoning_content` (a separate field it always fills before
+  writing the visible answer) could consume the entire budget, leaving
+  `message.content` as JSON `null` with `finish_reason: "length"` — reproduced
+  live with the real answer_eval prompt above at `max_tokens=200`. `_chat()`
+  did `r.json()[...]["content"].strip()`, which throws `AttributeError` on
+  `None` — uncaught by the `except (KeyError, IndexError, ValueError)` clause,
+  so this would have crashed the request instead of failing closed with a
+  clean `LLMError`, even though the module docstring promises "fails CLOSED... 
+  never a verdict."
+- **Fix (`backend/llm.py`):**
+  - `TIMEOUT` 45s → 120s, `LONG_TIMEOUT` 90s → 180s (proportional; the audit/
+    synthesis calls were already less tight but sit on the same degraded base
+    latency).
+  - `answer_eval` `max_tokens` 200 → 500, `question_gen` 300 → 600 — same
+    short visible output, just headroom for the reasoning trace ahead of it.
+  - `_chat()`: `content = r.json()[...]["content"]` then `text = (content or
+    "").strip()`, so a null content now hits the existing "evaluator returned
+    an empty response" `LLMError` path instead of crashing.
+- **Verified against the real code path, not a standalone script:** ran
+  `llm.evaluate_answer()` directly (same function `main.py` calls) against a
+  realistic artifact/question/answer triple. Got back a real `FAIL` verdict
+  with a substantive reason in 41.8s, and confirmed a matching row landed in
+  the `LLMCall` audit table (`purpose=answer_eval`, correct `parsed_verdict`).
+- **Residual risk, not further fixed:** kimi-k3's latency is now high enough
+  (60-90s+ typical) that a user submitting a gated-task answer will wait
+  close to a minute for a verdict even on the happy path, and a worst case
+  with all `RETRIES` exhausted could take several minutes before surfacing a
+  real failure. 120s/180s were chosen to stop the *false* timeouts I could
+  reproduce, not to guarantee a snappy UI — if the model's hosted latency is
+  a lasting regression rather than transient load, the next step would be
+  evaluating a faster non-reasoning model for the two latency-sensitive gated-
+  flow calls (question_gen/answer_eval) specifically, leaving kimi-k3 for the
+  less time-sensitive audit/synthesis calls. Left as-is for now since I have
+  no way to tell transient load from a permanent regression from here.
+- Files: `backend/llm.py` (`TIMEOUT`, `LONG_TIMEOUT`, two `max_tokens`
+  values, `_chat()` null-content guard, updated comments).
