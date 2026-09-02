@@ -21,7 +21,7 @@ services:
       - key: SUPABASE_S3_REGION
         value: ap-southeast-1
       - key: EVAL_MODEL
-        value: moonshotai/kimi-k3
+        value: nvidia/nemotron-3-super-120b-a12b
       # secrets — set these in the dashboard (never committed)
       - key: GATEKEEPER_PASSWORD
         sync: false

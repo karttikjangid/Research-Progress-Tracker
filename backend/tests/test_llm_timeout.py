@@ -28,6 +28,17 @@ def test_short_calls_use_default_timeout(app, monkeypatch):
     assert seen['timeout'] == app.llm.TIMEOUT
 
 
+def test_nemotron_super_disables_thinking_for_clean_verdicts(app, monkeypatch):
+    seen = {}
+    def fake_post(url, headers, json, timeout):
+        seen['payload'] = json
+        return _ok("a probing question")
+    monkeypatch.setenv("EVAL_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+    monkeypatch.setattr(requests, "post", fake_post)
+    app.llm.generate_question("some artifact text")
+    assert seen['payload']['chat_template_kwargs'] == {"enable_thinking": False}
+
+
 def test_transcript_audit_uses_long_timeout(app, monkeypatch):
     seen = {}
     def fake_post(url, headers, json, timeout):

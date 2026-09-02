@@ -17,13 +17,10 @@ import db as _db
 
 BASE_URL = "https://integrate.api.nvidia.com/v1"
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
-# kimi-k3 latency has gotten much worse since the 45s figure was set (that was
-# based on an ~11-15s trivial-prompt probe on 2026-08-15). Live probes on
-# 2026-08-29 measured 61-90s for a REAL question_gen/answer_eval-shaped
-# prompt, and even a one-word "hi" reply took 61-70s (once >90s outright) —
-# this is now inherent to the hosted model/endpoint, not prompt complexity.
-# 45s was firing "evaluator unreachable: ReadTimeout" on calls that would
-# have succeeded given more time. See SESSION_LOG.md for the raw probe data.
+# The timeouts retain headroom for occasional NIM queueing and long-form audits.
+# The default evaluator, Nemotron 3 Super, was verified with this account on
+# production-shaped follow-up and verdict prompts in seconds rather than Kimi
+# K3's minute-scale response times. See SESSION_LOG.md for the model probe.
 TIMEOUT = 120
 # transcript_audit/weekly_synthesis ask for 900-1200 output tokens — 2x the
 # 500-600 the gated-flow calls (question_gen/answer_eval) request, on top of
@@ -111,22 +108,29 @@ def _chat(system: str, user: str, max_tokens: int = 1024, timeout: int = TIMEOUT
     key = os.getenv("NVIDIA_API_KEY")
     if not key:
         raise LLMError("NVIDIA_API_KEY is not set in .env")
-    # meta/llama-3.1-70b-instruct hit NVIDIA's EOL 2026-08-25. Replaced with
-    # moonshotai/kimi-k3 — verified against this account's actual entitlements,
-    # not just the /v1/models listing. See SESSION_LOG.md for the model probe.
-    model = os.getenv("EVAL_MODEL", "moonshotai/kimi-k3")
+    # Nemotron 3 Super is available on NVIDIA's free endpoint and was verified
+    # with this account's entitlement and strict evaluator verdict format.
+    model = os.getenv("EVAL_MODEL", "nvidia/nemotron-3-super-120b-a12b")
     last = None
     for attempt in range(RETRIES + 1):
         if attempt:
             time.sleep(attempt)  # 1s, 2s
         t0 = time.monotonic()
         try:
+            payload = {
+                "model": model, "temperature": 0, "max_tokens": max_tokens,
+                "messages": [{"role": "system", "content": system},
+                             {"role": "user", "content": user}],
+            }
+            # This model supports a documented switch for its reasoning trace.
+            # The app needs its concise final answer (especially the strict
+            # verdict line), so avoid spending its output budget on hidden work.
+            if model == "nvidia/nemotron-3-super-120b-a12b":
+                payload["chat_template_kwargs"] = {"enable_thinking": False}
             r = requests.post(
                 f"{BASE_URL}/chat/completions",
                 headers={"Authorization": f"Bearer {key}"},
-                json={"model": model, "temperature": 0, "max_tokens": max_tokens,
-                      "messages": [{"role": "system", "content": system},
-                                   {"role": "user", "content": user}]},
+                json=payload,
                 timeout=timeout,
             )
         except requests.RequestException as e:
@@ -147,10 +151,9 @@ def _chat(system: str, user: str, max_tokens: int = 1024, timeout: int = TIMEOUT
             content = r.json()["choices"][0]["message"]["content"]
         except (KeyError, IndexError, ValueError):
             raise LLMError("evaluator returned an unexpected response shape")
-        # kimi-k3 puts its chain-of-thought in a separate reasoning_content
-        # field and can exhaust max_tokens on reasoning alone, leaving this
-        # field null (finish_reason "length") rather than an empty string.
-        # `None.strip()` would crash uncaught here instead of failing closed.
+        # Reasoning models may put their reasoning in a separate field and can
+        # exhaust max_tokens before producing visible content. `None.strip()`
+        # would crash uncaught here instead of failing closed.
         text = (content or "").strip()
         if not text:
             raise LLMError("evaluator returned an empty response")
