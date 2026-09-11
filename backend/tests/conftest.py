@@ -27,6 +27,14 @@ def app(tmp_path, monkeypatch):
     """Fresh app + fresh state root (db, data, logs, backups) per test."""
     monkeypatch.setenv("GATEKEEPER_STATE", str(tmp_path))
     monkeypatch.setenv("NVIDIA_API_KEY", "test-key-never-used")
+    # Set (not deleted) to empty: `import main` below re-runs load_dotenv(),
+    # which fills in any var that's absent from os.environ but leaves one
+    # that's merely empty alone — so this reliably keeps the real .env's
+    # GEMINI_API_KEY out of the default test path regardless of machine.
+    # `_chat` treats "" as falsy, same as unset. Tests exercising the Gemini
+    # path or the Gemini->NVIDIA fallback set a real value themselves (see
+    # test_llm_gemini.py).
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.delenv("GATEKEEPER_DB", raising=False)
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)

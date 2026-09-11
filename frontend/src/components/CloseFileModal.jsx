@@ -8,17 +8,18 @@ import { headerDate } from '../format'
 //   closed       bool — which state to show
 //   loading      bool — summary still loading
 //   error        string — load/close error, if any
-//   rows         [{ label, verdict, tone }] — exhibit summary lines
+//   rows         [{ label, verdict, tone, actionLabel?, onAction?, actionBusy? }]
 //   tickCount, tickTotal — free ticks done / total
 //   warnings     string[] — cold factual notices about what closing will record
 //                (open session, verbal MISSED, TASTELOG MISSING); each rendered
 //                in the same s-err style. One mechanism for all close-time flags.
 //   consequence  sentence describing what closing records
 //   closedNote   acknowledgement html shown once closed
+//   resolveActions [{label, onClick, busy?}] — direct routes for loose ends
 //   onKeepWorking, onConfirmClose, onDone — handlers
 export default function CloseFileModal({
   closed, loading = false, error = '', rows = [], tickCount = 0, tickTotal = 0,
-  warnings = [], consequence, closedNote, onKeepWorking, onConfirmClose, onDone,
+  warnings = [], consequence, closedNote, resolveActions = [], onKeepWorking, onConfirmClose, onDone,
 }) {
   return (
     <motion.div className="s-ovl"
@@ -35,9 +36,15 @@ export default function CloseFileModal({
               <p className="dk-req m0" style={{ marginBottom: '8px' }}>No gated exhibits filed today.</p>
             )}
             {rows.map((r, i) => (
-              <div className="s-srow" key={i}>
-                <span>{r.label}</span>
-                <span className={`s-vs ${r.tone || ''}`.trim()}>{r.verdict}</span>
+              <div className="s-srow ux-close-row" key={i}>
+                <span className="ux-close-label">{r.label}</span>
+                <span className="fx ac gap8 ux-close-status">
+                  <span className={`s-vs ${r.tone || ''}`.trim()}>{r.verdict}</span>
+                  {r.actionLabel && (
+                    <button className="s-mini-btn ux-row-action" type="button" onClick={r.onAction}
+                      disabled={r.actionBusy}>{r.actionLabel}</button>
+                  )}
+                </span>
               </div>
             ))}
             {(rows.length > 0 || tickTotal > 0) && (
@@ -49,6 +56,14 @@ export default function CloseFileModal({
             {!loading && warnings.map((w, i) => (
               <p className="s-err" key={i} style={{ lineHeight: 1.6, margin: '8px 0 0' }}>{w}</p>
             ))}
+            {!loading && resolveActions.length > 0 && (
+              <div className="ux-close-actions" aria-label="Resolve unfinished work">
+                {resolveActions.map((a) => (
+                  <button className="s-mini-btn" type="button" key={a.label}
+                    disabled={a.busy} onClick={a.onClick}>{a.busy ? 'WORKING…' : a.label}</button>
+                ))}
+              </div>
+            )}
             {!loading && (
               <p className="fs13" style={{ lineHeight: 1.6, margin: '8px 0 0' }}>{consequence}</p>
             )}

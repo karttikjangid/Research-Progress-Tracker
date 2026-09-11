@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { get, post } from './api'
+import { get, post, put } from './api'
 import { clock, daysUntil, dueLabel } from './format'
 import Momentum from './components/Momentum'
 import ThemeStrip from './components/ThemeStrip'
 import ExhibitCard from './components/ExhibitCard'
 import TicksStrip from './components/TicksStrip'
 import GatedFlow from './components/GatedFlow'
+import SessionEndSheet from './components/SessionEndSheet'
+import ReviewCenter from './components/ReviewCenter'
+import './daily-ux.css'
 
 const REQ = 'Evidence required · examined on submission · verdict final'
 const SESSION_KEY = 'gk_session'
@@ -25,6 +28,9 @@ export default function Today({ closed = false, streak, onStreakChange }) {
   const [recent, setRecent] = useState([])
   const [error, setError] = useState('')
   const [gating, setGating] = useState(null)
+  const [ending, setEnding] = useState(null)
+  const [endingBusy, setEndingBusy] = useState(false)
+  const [endingError, setEndingError] = useState('')
   const [focused, setFocused] = useState(null) // task id of the pulled-forward card
   const [dealt, setDealt] = useState(false)     // fan has finished dealing in
   const [session, setSession] = useState(() => {
@@ -83,18 +89,14 @@ export default function Today({ closed = false, streak, onStreakChange }) {
   // localStorage only clears on a clean endSession() call, so a server
   // restart, crash, or a reload after the backend's own >6h auto-close leaves
   // a false "session running" lock with no way to clear it — this is exactly
-  // that reported bug. Trust the backend: gone means gone, still-open keeps
-  // its cached task_id (backend has no task link) so the right card still
-  // shows the live timer.
+  // that reported bug. Trust the backend outright: task_id is a real backend
+  // column (see 022_session_task_link.sql), not reconstructed from a
+  // possibly-missing local cache — a request delayed by a cold start (e.g.
+  // Render's free-tier wake) or a reload racing the initial start-session
+  // response used to fall back to task_id=null here, which silently hid a
+  // still-running timer from every task card.
   useEffect(() => {
-    get('/api/sessions/current').then((cur) => {
-      if (!cur) { storeSession(null); return }
-      setSession((prev) => {
-        const merged = { ...cur, task_id: prev && prev.id === cur.id ? prev.task_id : null }
-        storeSession(merged)
-        return merged
-      })
-    }).catch(() => {})
+    get('/api/sessions/current').then((cur) => storeSession(cur)).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -137,22 +139,54 @@ export default function Today({ closed = false, streak, onStreakChange }) {
     setSession(v)
   }
   const beginSession = (taskId) =>
-    post('/api/sessions/start', { kind: 'struggle_timer', planned_minutes: 20 })
-      .then((sess) => storeSession({ ...sess, task_id: taskId }))
+    post('/api/sessions/start', { kind: 'struggle_timer', planned_minutes: 20, task_id: taskId })
+      .then((sess) => storeSession(sess))
       .catch((e) => setError(e.message))
   const endSession = (task) => {
     if (!session) return
+    if (task) {
+      setEndingError('')
+      setEnding(task)
+      return
+    }
     post(`/api/sessions/${session.id}/end`).then(() => {
       storeSession(null)
       onStreakChange?.()
-      // Ending a timed session on a gated exhibit hands it straight to the
-      // examiner: open the evidence flow so questions are asked and a verdict
-      // recorded. Skip if the exhibit is already resolved (passed / locked).
-      if (task && (task.status === 'open' || task.status === 'failed_once')) setGating(task)
-    }).catch((e) => { setError(e.message); storeSession(null) })
+    }).catch((e) => setError(e.message))
+  }
+  const resolveSession = async (choice, notes) => {
+    if (!session || !ending || endingBusy) return
+    setEndingBusy(true); setEndingError('')
+    const continuation = choice === 'finish'
+      ? { state: 'active', next_step: '', blocker: '', tried: '' }
+      : { state: choice, ...notes }
+    try {
+      const updated = await put(`/api/tasks/${ending.id}/continuation`, continuation)
+      try {
+        await post(`/api/sessions/${session.id}/end`)
+      } catch (endError) {
+        const current = await get('/api/sessions/current').catch(() => session)
+        if (current) throw endError
+      }
+      storeSession(null)
+      setEnding(null)
+      refresh()
+      onStreakChange?.()
+      if (choice === 'finish' && (updated.status === 'open' || updated.status === 'failed_once')) setGating(updated)
+    } catch (e) {
+      setEndingError(e.message)
+    } finally {
+      setEndingBusy(false)
+    }
   }
   const completeTick = (id) =>
     post(`/api/tasks/${id}/complete`).then(refresh).catch((e) => setError(e.message))
+  const openRecallTask = (id) => {
+    refresh().then(() => {
+      setFocused(id)
+      window.setTimeout(() => document.querySelector('.dk-fan')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 80)
+    })
+  }
 
   if (!data) return <p className="dk-req" style={{ marginTop: '28px' }}>{error || 'Loading the file…'}</p>
 
@@ -189,6 +223,16 @@ export default function Today({ closed = false, streak, onStreakChange }) {
     return t.reason
   }
 
+  const continuationFor = (t) => {
+    if (t.continuation_state === 'stuck' && t.blocker) {
+      return <p className="ux-continuation"><span className="ux-continuation-label dk-f">BLOCKED</span>{t.blocker}</p>
+    }
+    if (t.continuation_state === 'paused' && t.next_step) {
+      return <p className="ux-continuation"><span className="ux-continuation-label">NEXT</span>{t.next_step}</p>
+    }
+    return null
+  }
+
   // Session-area node for one exhibit (live timer, begin/end).
   const sessionSlot = (t) => {
     const unresolved = t.status === 'open' || t.status === 'failed_once'
@@ -199,7 +243,7 @@ export default function Today({ closed = false, streak, onStreakChange }) {
           <div><div className="s-lab">SESSION RUNNING</div><div className="dk-time mt8">{clock(elapsed)}</div></div>
           <div className="fx col gap8" style={{ alignItems: 'flex-end' }}>
             <span className="dk-sess">IN SESSION</span>
-            <button className="s-mini-btn dk-f" type="button" onClick={(e) => { e.stopPropagation(); endSession(t) }}>■ END</button>
+            <button className="s-mini-btn dk-f" type="button" onClick={(e) => { e.stopPropagation(); endSession(t) }}>■ END SESSION</button>
           </div>
         </div>
       )
@@ -269,6 +313,10 @@ export default function Today({ closed = false, streak, onStreakChange }) {
 
       {!closed && <StreakConditions />}
 
+      <div id="learning-reviews">
+        <ReviewCenter onChange={() => { refresh(); onStreakChange?.() }} onOpenRecall={openRecallTask} />
+      </div>
+
       {gated.length === 0 ? (
         <div className="s-panel" style={{ marginTop: '30px' }}>
           <div className="dk-osw fs12" style={{ letterSpacing: '.22em' }}>NO EXHIBITS FILED</div>
@@ -307,6 +355,7 @@ export default function Today({ closed = false, streak, onStreakChange }) {
                 }}
               >
                 {sessionSlot(t)}
+                {continuationFor(t)}
               </ExhibitCard>
             )
           })}
@@ -327,6 +376,10 @@ export default function Today({ closed = false, streak, onStreakChange }) {
 
       <AnimatePresence>
         {gating && <GatedFlow key="gated" task={gating} onDone={() => { setGating(null); refresh(); onStreakChange?.() }} />}
+      </AnimatePresence>
+      <AnimatePresence>
+        {ending && <SessionEndSheet key="end-session" task={ending} busy={endingBusy} error={endingError}
+          onCancel={() => { if (!endingBusy) { setEnding(null); setEndingError('') } }} onResolve={resolveSession} />}
       </AnimatePresence>
     </>
   )
@@ -403,7 +456,6 @@ function Ancillary({ onChange }) {
         <div className="fx col gap16">
           <Docket onChange={onChange} />
           <FileItem onChange={onChange} />
-          <DueReviews onChange={onChange} />
         </div>
         <TasteLog />
       </div>
@@ -525,54 +577,6 @@ function FileItem({ onChange }) {
   )
 }
 
-function DueReviews({ onChange }) {
-  const [due, setDue] = useState([])
-  const [open, setOpen] = useState(null)
-  const [err, setErr] = useState('')
-  const [busy, setBusy] = useState(false)
-  const load = useCallback(() => get('/api/reviews/due').then(setDue).catch((e) => setErr(e.message)), [])
-  useEffect(() => { load() }, [load])
-
-  const reveal = (id) => post(`/api/reviews/${id}/reveal`).then((r) => setOpen({ id, ...r })).catch((e) => setErr(e.message))
-  const grade = (id, g) => {
-    if (busy) return
-    setBusy(true); setErr('')
-    post(`/api/reviews/${id}/grade`, { grade: g })
-      .then(() => { setOpen(null); load(); onChange?.() })
-      .catch((e) => setErr(e.message))
-      .finally(() => setBusy(false))
-  }
-
-  if (!due.length) return null
-  return (
-    <div className="s-card">
-      <div className="s-lab">REVIEWS DUE ({due.length})</div>
-      {err && <p className="s-err" style={{ margin: '8px 0' }}>{err}</p>}
-      <div style={{ marginTop: '10px' }}>
-        {due.map((r) => (
-          <div key={r.id} style={{ padding: '8px 0', borderTop: '1px dashed rgba(36,31,21,.3)' }}>
-            <div className="fx jb ac">
-              <span className="fs13">{r.overdue && <span className="dk-f fw7">OVERDUE · </span>}Recall: <span className="fw7">{r.title}</span></span>
-              {open?.id !== r.id && <button className="s-mini-btn" type="button" onClick={() => reveal(r.id)}>REVEAL</button>}
-            </div>
-            {open?.id === r.id && (
-              <div style={{ marginTop: '8px' }}>
-                <div className="fs12" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{open.artifact}</div>
-                <p className="fs12" style={{ margin: '8px 0 0', fontStyle: 'italic' }}>Q: {open.question}</p>
-                <div className="fx gap8" style={{ marginTop: '10px' }}>
-                  {['recalled', 'partial', 'forgot'].map((g) => (
-                    <button key={g} className="s-mini-btn" type="button" disabled={busy} onClick={() => grade(r.id, g)}>{g.toUpperCase()}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // End-of-day consolidation: one retrieval prompt (what you can explain now that
 // you couldn't this morning) + the day's hardest sticking point, which the
 // backend schedules as tomorrow's spaced-repetition review. Immutable once
@@ -601,7 +605,7 @@ function TasteLog() {
 
   const ydayLine = yday && (yday.understood || yday.one_liner)
   return (
-    <div className="s-card">
+    <div className="s-card" id="end-of-day">
       <div className="s-lab">END OF DAY · CONSOLIDATE</div>
       {ydayLine && (
         <p className="s-hint" style={{ marginTop: '10px', lineHeight: 1.5 }}>

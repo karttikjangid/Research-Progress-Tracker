@@ -1,8 +1,12 @@
-"""NVIDIA NIM client. Fails CLOSED: any doubt raises LLMError, never a verdict.
+"""LLM client. Fails CLOSED: any doubt raises LLMError, never a verdict.
 
-120s timeout, 2 retries with backoff on network errors / 429 / 5xx (a 4xx like
-bad auth is not retried). An evaluator reply that doesn't match the strict
-verdict format is an error — there is no code path from garbage output to PASS.
+Gemini (2.5 Flash by default) is the primary evaluator; NVIDIA NIM is a
+fallback used only when GEMINI_API_KEY is unset or every Gemini attempt
+fails, so a Gemini outage degrades the evaluator rather than blocking
+gated tasks outright. 120s timeout, 2 retries with backoff on network
+errors / 429 / 5xx (a 4xx like bad auth is not retried), on each provider
+independently. An evaluator reply that doesn't match the strict verdict
+format is an error — there is no code path from garbage output to PASS.
 """
 import hashlib
 import os
@@ -11,16 +15,22 @@ import time
 from pathlib import Path
 
 import requests
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 
 import clock
 import db as _db
+import infra
 
-BASE_URL = "https://integrate.api.nvidia.com/v1"
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
-# The timeouts retain headroom for occasional NIM queueing and long-form audits.
-# The default evaluator, Nemotron 3 Super, was verified with this account on
-# production-shaped follow-up and verdict prompts in seconds rather than Kimi
-# K3's minute-scale response times. See SESSION_LOG.md for the model probe.
+# The timeouts retain headroom for occasional queueing and long-form audits.
+# Gemini Flash is fast enough that these are rarely approached; they were
+# sized for NVIDIA's Nemotron 3 Super (see SESSION_LOG.md for the model
+# probe) and kept as the shared budget for both providers rather than tuned
+# down, since a generous timeout on a fast provider costs nothing but a slow
+# fallback still needs the headroom.
 TIMEOUT = 120
 # transcript_audit/weekly_synthesis ask for 900-1200 output tokens — 2x the
 # 500-600 the gated-flow calls (question_gen/answer_eval) request, on top of
@@ -105,7 +115,83 @@ def _call(purpose: str, task_id: int | None, system: str, user: str,
 
 
 def _chat(system: str, user: str, max_tokens: int = 1024, timeout: int = TIMEOUT) -> str:
-    key = os.getenv("NVIDIA_API_KEY")
+    """Gemini first, NVIDIA as fallback. Each provider retries independently
+    (see _chat_gemini/_chat_nvidia); this only decides whether to fall
+    through to the second provider, so a Gemini-side outage degrades the
+    evaluator instead of blocking gated tasks outright."""
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    nvidia_key = os.getenv("NVIDIA_API_KEY")
+    if not gemini_key and not nvidia_key:
+        raise LLMError("no evaluator configured: set GEMINI_API_KEY or NVIDIA_API_KEY")
+
+    if not gemini_key:
+        return _chat_nvidia(nvidia_key, system, user, max_tokens, timeout)
+    try:
+        return _chat_gemini(gemini_key, system, user, max_tokens, timeout)
+    except LLMError as gemini_error:
+        if not nvidia_key:
+            raise
+        infra.log.warning("gemini evaluator failed, falling back to nvidia: %s", gemini_error)
+        try:
+            return _chat_nvidia(nvidia_key, system, user, max_tokens, timeout)
+        except LLMError as nvidia_error:
+            raise LLMError(f"gemini failed ({gemini_error}); "
+                           f"nvidia fallback also failed ({nvidia_error})") from nvidia_error
+
+
+def _gemini_config(system: str, max_tokens: int, timeout: int) -> "genai_types.GenerateContentConfig":
+    return genai_types.GenerateContentConfig(
+        system_instruction=system, temperature=0, max_output_tokens=max_tokens,
+        # "MINIMAL" isn't accepted by every Flash model (confirmed live against
+        # gemini-3.8-flash: 400 INVALID_ARGUMENT); "LOW" is the actual floor and
+        # still lets a trivial verdict prompt finish with zero thinking tokens
+        # spent (verified against the real API — see SESSION_LOG.md).
+        thinking_config=genai_types.ThinkingConfig(thinking_level=genai_types.ThinkingLevel.LOW),
+        http_options=genai_types.HttpOptions(timeout=timeout * 1000),  # ms
+    )
+
+
+def _chat_gemini(key: str, system: str, user: str, max_tokens: int, timeout: int) -> str:
+    model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    client = genai.Client(api_key=key)
+    config = _gemini_config(system, max_tokens, timeout)
+    last = None
+    for attempt in range(RETRIES + 1):
+        if attempt:
+            time.sleep(attempt)  # 1s, 2s
+        t0 = time.monotonic()
+        try:
+            resp = client.models.generate_content(model=model, contents=user, config=config)
+        except genai_errors.ServerError as e:
+            last = f"gemini HTTP {e.code}"
+            continue
+        except genai_errors.ClientError as e:
+            if e.code == 429:
+                last = f"gemini HTTP {e.code}"
+                continue
+            raise LLMError(f"gemini HTTP {e.code}: {str(e)[:200]}")  # 4xx: retrying won't help
+        except genai_errors.APIError as e:
+            last = f"gemini HTTP {getattr(e, 'code', '5xx')}"
+            continue
+        except Exception as e:
+            # Network-level failures (timeout, DNS, connection reset) rather
+            # than an HTTP error response.
+            elapsed = time.monotonic() - t0
+            last = (f"gemini unreachable: {e.__class__.__name__} "
+                    f"(after {elapsed:.1f}s, budget {timeout}s)")
+            continue
+        # As with NVIDIA's reasoning models: thinking can consume the whole
+        # token budget and leave no visible text — fail closed, not a crash.
+        text = (resp.text or "").strip()
+        if not text:
+            candidates = resp.candidates or []
+            reason = candidates[0].finish_reason if candidates else None
+            raise LLMError(f"gemini returned an empty response (finish_reason={reason})")
+        return text
+    raise LLMError(last or "gemini failed")
+
+
+def _chat_nvidia(key: str, system: str, user: str, max_tokens: int, timeout: int) -> str:
     if not key:
         raise LLMError("NVIDIA_API_KEY is not set in .env")
     # Nemotron 3 Super is available on NVIDIA's free endpoint and was verified
@@ -128,7 +214,7 @@ def _chat(system: str, user: str, max_tokens: int = 1024, timeout: int = TIMEOUT
             if model == "nvidia/nemotron-3-super-120b-a12b":
                 payload["chat_template_kwargs"] = {"enable_thinking": False}
             r = requests.post(
-                f"{BASE_URL}/chat/completions",
+                f"{NVIDIA_BASE_URL}/chat/completions",
                 headers={"Authorization": f"Bearer {key}"},
                 json=payload,
                 timeout=timeout,
@@ -139,26 +225,26 @@ def _chat(system: str, user: str, max_tokens: int = 1024, timeout: int = TIMEOUT
             # or the model genuinely ran out of time — otherwise a "ReadTimeout"
             # is a mystery when it fires way faster than the timeout implies.
             elapsed = time.monotonic() - t0
-            last = (f"evaluator unreachable: {e.__class__.__name__} "
+            last = (f"nvidia unreachable: {e.__class__.__name__} "
                     f"(after {elapsed:.1f}s, budget {timeout}s)")
             continue
         if r.status_code == 429 or r.status_code >= 500:
-            last = f"evaluator HTTP {r.status_code}"
+            last = f"nvidia HTTP {r.status_code}"
             continue
         if r.status_code != 200:  # 4xx: retrying won't help
-            raise LLMError(f"evaluator HTTP {r.status_code}: {r.text[:200]}")
+            raise LLMError(f"nvidia HTTP {r.status_code}: {r.text[:200]}")
         try:
             content = r.json()["choices"][0]["message"]["content"]
         except (KeyError, IndexError, ValueError):
-            raise LLMError("evaluator returned an unexpected response shape")
+            raise LLMError("nvidia returned an unexpected response shape")
         # Reasoning models may put their reasoning in a separate field and can
         # exhaust max_tokens before producing visible content. `None.strip()`
         # would crash uncaught here instead of failing closed.
         text = (content or "").strip()
         if not text:
-            raise LLMError("evaluator returned an empty response")
+            raise LLMError("nvidia returned an empty response")
         return text
-    raise LLMError(last or "evaluator failed")
+    raise LLMError(last or "nvidia failed")
 
 
 def generate_question(artifact: str, task_id: int | None = None,

@@ -33,6 +33,11 @@ export default function App() {
   useEffect(() => { loadStreak() }, [loadStreak, screen])
 
   const Active = SCREENS[screen]
+  const goToToday = (anchor) => {
+    setModal(false)
+    setScreen('today')
+    window.setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 250)
+  }
 
   return (
     <>
@@ -69,6 +74,7 @@ export default function App() {
             closed={closed}
             onClosed={() => { setClosed(true); loadStreak() }}
             onDismiss={() => setModal(false)}
+            onNavigate={goToToday}
           />
         )}
       </AnimatePresence>
@@ -80,12 +86,14 @@ export default function App() {
 // Loads today's tasks to build the close-of-day summary, then runs the real
 // POST /api/day/close. Two states: confirm (with the verdict summary + real
 // consequence) and the closed acknowledgement.
-function CloseFileController({ closed, onClosed, onDismiss }) {
+function CloseFileController({ closed, onClosed, onDismiss, onNavigate }) {
   const [tasks, setTasks] = useState(null)
   const [result, setResult] = useState(null) // day/close response
   const [err, setErr] = useState('')
   const [openSession, setOpenSession] = useState(null)
   const [tastelog, setTastelog] = useState(undefined) // undefined=loading, null=none
+  const [working, setWorking] = useState('')
+  const [carried, setCarried] = useState(() => new Set())
 
   useEffect(() => { get('/api/tasks').then(setTasks).catch((e) => setErr(e.message)) }, [])
   // A session left running through close() never gets an ended_at today, so
@@ -109,9 +117,34 @@ function CloseFileController({ closed, onClosed, onDismiss }) {
     failed_once: { verdict: 'FAIL (RETRY LEFT)', tone: 'dk-f' },
     open: { verdict: 'OPEN — FILED AS-IS', tone: '' },
   }
+  const carryForward = (task) => {
+    if (carried.has(task.id)) return
+    // Immediate feedback matters here, and the backend operation is
+    // idempotent. Revert the label only if the request actually fails.
+    setCarried((prev) => new Set([...prev, task.id])); setErr('')
+    post(`/api/tasks/${task.id}/carry-forward`, {})
+      .catch((e) => {
+        setCarried((prev) => { const next = new Set(prev); next.delete(task.id); return next })
+        setErr(e.message)
+      })
+  }
+  const endOpenSession = () => {
+    if (!openSession) return
+    setWorking('session'); setErr('')
+    post(`/api/sessions/${openSession.id}/end`)
+      .then(() => setOpenSession(null))
+      .catch((e) => setErr(e.message))
+      .finally(() => setWorking(''))
+  }
+
   const rows = gated.map((t, i) => ({
     label: `EXHIBIT ${String.fromCharCode(65 + i)} — ${t.title}`,
     ...(VMAP[t.status] || { verdict: t.status.toUpperCase(), tone: '' }),
+    ...(t.status === 'open' || t.status === 'failed_once' ? {
+      actionLabel: carried.has(t.id) ? 'READY TOMORROW' : 'CARRY FORWARD',
+      actionBusy: carried.has(t.id),
+      onAction: () => carryForward(t),
+    } : {}),
   }))
 
   const streakNum = result?.current_streak
@@ -142,6 +175,11 @@ function CloseFileController({ closed, onClosed, onDismiss }) {
   const confirmClose = () => {
     post('/api/day/close').then((r) => { setResult(r); onClosed() }).catch((e) => setErr(e.message))
   }
+  const resolveActions = [
+    openSession && { label: 'END RUNNING SESSION', busy: working === 'session', onClick: endOpenSession },
+    tasks?.reviews_due > 0 && { label: `DO ${tasks.reviews_due} REVIEW${tasks.reviews_due === 1 ? '' : 'S'}`, onClick: () => onNavigate('learning-reviews') },
+    tasks?.had_session_today && tastelog === null && { label: 'WRITE REFLECTION', onClick: () => onNavigate('end-of-day') },
+  ].filter(Boolean)
 
   return (
     <CloseFileModal
@@ -152,6 +190,7 @@ function CloseFileController({ closed, onClosed, onDismiss }) {
       tickCount={ticksDone}
       tickTotal={ticksTotal}
       warnings={warnings}
+      resolveActions={resolveActions}
       consequence={consequence}
       closedNote={closedNote}
       onKeepWorking={onDismiss}

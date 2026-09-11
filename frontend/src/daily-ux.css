@@ -1,0 +1,32 @@
+.ux-sheet-body { padding: 20px 26px 26px; }
+.ux-sheet-intro { line-height: 1.55; }
+.ux-sheet-error { margin: 12px 0 0; }
+.ux-end-choices { display: grid; gap: 8px; margin-top: 18px; }
+.ux-choice {
+  display: grid; gap: 3px; width: 100%; padding: 12px 14px; text-align: left;
+  color: #241f15; background: rgba(255, 250, 235, .28);
+  border: 1px solid rgba(36, 31, 21, .35); cursor: pointer;
+}
+.ux-choice:hover { background: rgba(255, 250, 235, .5); }
+.ux-choice:focus-visible { outline: 2px solid #93261f; outline-offset: 2px; }
+.ux-choice.selected { border: 2px solid #241f15; padding: 11px 13px; background: rgba(255, 250, 235, .65); }
+.ux-choice-title { font-family: 'Oswald', sans-serif; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+.ux-choice-detail { font: 12px/1.45 'Courier Prime', monospace; opacity: .72; }
+.ux-fields { display: grid; gap: 12px; margin-top: 16px; }
+.ux-field { display: grid; gap: 7px; margin-top: 16px; font-size: 12px; }
+.ux-fields .ux-field { margin-top: 0; }
+.ux-sheet-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 22px; }
+.ux-continuation { margin: 10px 0 0; padding-top: 9px; border-top: 1px dashed rgba(36, 31, 21, .3); font-size: 12px; line-height: 1.45; }
+.ux-continuation-label { font-family: 'Oswald', sans-serif; letter-spacing: .12em; font-size: 10px; margin-right: 6px; }
+.ux-close-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ux-close-row { flex-wrap: wrap; }
+.ux-close-label { flex: 1 1 210px; }
+.ux-close-status { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; }
+.ux-row-action { flex: 0 0 auto; }
+@media (max-width: 640px) {
+  .ux-end-sheet { width: calc(100vw - 24px); }
+  .ux-sheet-body { padding: 18px; }
+  .ux-sheet-actions { flex-direction: column-reverse; }
+  .ux-sheet-actions .s-btn { width: 100%; }
+  .ux-close-status { width: 100%; justify-content: space-between; }
+}

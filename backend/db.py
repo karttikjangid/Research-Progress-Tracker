@@ -76,6 +76,7 @@ LEGAL_TRANSITIONS = {
               ("failed_once", "passed"), ("failed_once", "failed_final")},
 }
 CLOSED_STATUSES = ("done", "passed", "failed_final")
+CONTINUATION_STATES = ("active", "paused", "stuck")
 
 
 class Base(DeclarativeBase):
@@ -95,6 +96,15 @@ class Task(Base):
     answer: Mapped[str] = mapped_column(Text, default="")
     verdict: Mapped[str] = mapped_column(String, default="")
     reason: Mapped[str] = mapped_column(Text, default="")
+    # Mutable handoff context for an unfinished task. It is intentionally kept
+    # apart from submitted evidence so a pause never rewrites an artifact or
+    # answer that has been recorded for evaluation.
+    continuation_state: Mapped[str] = mapped_column(String, default="active")
+    next_step: Mapped[str] = mapped_column(Text, default="")
+    blocker: Mapped[str] = mapped_column(Text, default="")
+    tried: Mapped[str] = mapped_column(Text, default="")
+    carried_from_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True,
+                                                               index=True)
 
     @validates("status")
     def _v_status(self, _k, new):
@@ -147,10 +157,18 @@ class Task(Base):
                 f"max {MAX_ATTEMPTS} evaluation attempts per task per day")
         return new
 
+    @validates("continuation_state")
+    def _v_continuation_state(self, _k, new):
+        if new not in CONTINUATION_STATES:
+            raise IllegalTransition(f"invalid continuation state {new!r}")
+        return new
+
     def as_dict(self):
         return {c: getattr(self, c) for c in
                 ("id", "date", "title", "type", "status", "attempts",
-                 "artifact", "question", "answer", "verdict", "reason")}
+                 "artifact", "question", "answer", "verdict", "reason",
+                 "continuation_state", "next_step", "blocker", "tried",
+                 "carried_from_task_id")}
 
 
 class Answer(Base):
@@ -312,11 +330,17 @@ class WorkSession(Base):
     aborted: Mapped[bool] = mapped_column(Boolean, default=False)
     abort_trigger: Mapped[str] = mapped_column(Text, default="")
     notes: Mapped[str] = mapped_column(Text, default="")
+    # Which task this timer is for — backend-authoritative so a client-side
+    # cache miss (cold start, different device, cleared storage) can never
+    # make a live session invisible. Nullable: not every session kind is
+    # tied to a specific task.
+    task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     def as_dict(self):
         return {c: getattr(self, c) for c in
                 ("id", "date", "kind", "planned_minutes", "actual_minutes",
-                 "started_at", "ended_at", "aborted", "abort_trigger", "notes")}
+                 "started_at", "ended_at", "aborted", "abort_trigger", "notes",
+                 "task_id")}
 
 
 class TasteLog(Base):

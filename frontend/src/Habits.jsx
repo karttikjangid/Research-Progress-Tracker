@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { get, post } from './api'
+import './habits-progressive.css'
 
 // HABITS (formerly PROTOCOL) — the daily operating system, now tickable.
 //
@@ -74,8 +75,10 @@ export default function Habits() {
       <HabitLedger />
 
       {schedule.length > 0 && (
-        <section className="pr-section">
-          <div className="pr-h">Daily docket <span className="pr-now">● NOW {clockHHMM(cur)}</span></div>
+        <GuidanceSection
+          title="Daily docket"
+          summary={docketSummary(schedule, active, cur)}
+        >
           <div className="pr-docket">
             {schedule.map((b, i) => (
               <div className={`pr-row${i === active ? ' now' : ''}`} key={`${b.time}-${i}`}>
@@ -87,12 +90,14 @@ export default function Habits() {
               </div>
             ))}
           </div>
-        </section>
+        </GuidanceSection>
       )}
 
       {data.daily_mind_habits?.length > 0 && (
-        <section className="pr-section">
-          <div className="pr-h">Method</div>
+        <GuidanceSection
+          title="Method"
+          summary={`${data.daily_mind_habits.length} ${pluralize(data.daily_mind_habits.length, 'practice')}`}
+        >
           <div className="pr-cards">
             {data.daily_mind_habits.map((h, i) => (
               <div className="pr-card" key={h.id || i}>
@@ -104,37 +109,40 @@ export default function Habits() {
               </div>
             ))}
           </div>
-        </section>
+        </GuidanceSection>
       )}
 
-      {(data.weekly?.length > 0 || data.nutrition_rules?.length > 0) && (
-        <div className="pr-two">
-          {data.weekly?.length > 0 && (
-            <div>
-              <div className="pr-h">Weekly rituals</div>
-              <dl className="rm-deflist">
-                {data.weekly.map((w, i) => (
-                  <div className="rm-def" key={w.id || i}><dt>{w.title}</dt><dd>{w.explanation}</dd></div>
-                ))}
-              </dl>
-            </div>
-          )}
-          {data.nutrition_rules?.length > 0 && (
-            <div>
-              <div className="pr-h">Sustenance</div>
-              <dl className="rm-deflist">
-                {data.nutrition_rules.map((n, i) => (
-                  <div className="rm-def" key={i}><dt>{n.rule}</dt><dd>{n.explanation}</dd></div>
-                ))}
-              </dl>
-            </div>
-          )}
-        </div>
+      {data.weekly?.length > 0 && (
+        <GuidanceSection
+          title="Weekly rituals"
+          summary={`${data.weekly.length} ${pluralize(data.weekly.length, 'ritual')}`}
+        >
+          <dl className="rm-deflist">
+            {data.weekly.map((w, i) => (
+              <div className="rm-def" key={w.id || i}><dt>{w.title}</dt><dd>{w.explanation}</dd></div>
+            ))}
+          </dl>
+        </GuidanceSection>
+      )}
+
+      {data.nutrition_rules?.length > 0 && (
+        <GuidanceSection
+          title="Sustenance"
+          summary={`${data.nutrition_rules.length} ${pluralize(data.nutrition_rules.length, 'guide')}`}
+        >
+          <dl className="rm-deflist">
+            {data.nutrition_rules.map((n, i) => (
+              <div className="rm-def" key={i}><dt>{n.rule}</dt><dd>{n.explanation}</dd></div>
+            ))}
+          </dl>
+        </GuidanceSection>
       )}
 
       {data.scorecard?.length > 0 && (
-        <section className="pr-section">
-          <div className="pr-h">Compliance scorecard</div>
+        <GuidanceSection
+          title="Compliance scorecard"
+          summary={`${data.scorecard.length} ${pluralize(data.scorecard.length, 'measure')}`}
+        >
           <div className="pr-score">
             {data.scorecard.map((s, i) => (
               <div className="pr-score-row" key={i}>
@@ -143,9 +151,50 @@ export default function Habits() {
               </div>
             ))}
           </div>
-        </section>
+        </GuidanceSection>
       )}
     </>
+  )
+}
+
+function pluralize(count, word) {
+  return `${word}${count === 1 ? '' : 's'}`
+}
+
+function docketSummary(schedule, active, cur) {
+  const current = active >= 0 ? schedule[active] : null
+  const next = schedule[active + 1] || (active < 0 ? schedule[0] : null)
+  const focus = current
+    ? `Now ${clockHHMM(cur)} · ${current.block}`
+    : next
+      ? `Next ${next.time} · ${next.block}`
+      : `${clockHHMM(cur)} · complete`
+  return `${schedule.length} ${pluralize(schedule.length, 'block')} · ${focus}`
+}
+
+function GuidanceSection({ title, summary, children }) {
+  const [open, setOpen] = useState(false)
+  const panelId = useId()
+
+  return (
+    <section className="hp-guidance">
+      <h2 className="hp-guidance-heading">
+        <button
+          className="hp-guidance-trigger"
+          type="button"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((current) => !current)}
+        >
+          <span className="hp-guidance-title">{title}</span>
+          <span className="hp-guidance-summary">{summary}</span>
+          <span className="hp-guidance-state" aria-hidden="true">{open ? 'HIDE' : 'VIEW'} <b>{open ? '−' : '+'}</b></span>
+        </button>
+      </h2>
+      <div id={panelId} className="hp-guidance-content" hidden={!open}>
+        {children}
+      </div>
+    </section>
   )
 }
 

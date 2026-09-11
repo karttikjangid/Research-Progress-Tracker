@@ -1,0 +1,88 @@
+/* Supporting protocol material stays close at hand without competing with the
+   daily ledger. These controls intentionally use the existing dossier palette
+   and type treatment rather than introducing a second visual system. */
+.hp-guidance {
+  margin-top: 18px;
+  border-top: 1px solid rgba(233, 223, 198, .2);
+  border-bottom: 1px solid rgba(233, 223, 198, .2);
+}
+
+.hp-guidance-heading { margin: 0; }
+
+.hp-guidance-trigger {
+  width: 100%;
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border: 0;
+  background: transparent;
+  color: #e9dfc6;
+  padding: 11px 2px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.hp-guidance-trigger:hover { background: rgba(233, 223, 198, .06); }
+
+.hp-guidance-title {
+  font-family: 'Oswald', sans-serif;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.hp-guidance-summary {
+  min-width: 0;
+  color: rgba(233, 223, 198, .62);
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hp-guidance-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #e9c987;
+  font-family: 'Oswald', sans-serif;
+  letter-spacing: .15em;
+  font-size: 9.5px;
+  white-space: nowrap;
+}
+
+.hp-guidance-state b {
+  font-family: 'Courier Prime', monospace;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: .8;
+}
+
+.hp-guidance-content { padding: 0 0 18px; }
+.hp-guidance-content .pr-docket,
+.hp-guidance-content .pr-cards,
+.hp-guidance-content .pr-score { margin-top: 0; }
+.hp-guidance-content .rm-deflist { margin: 0; }
+
+@media (max-width: 640px) {
+  .hp-guidance-trigger {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 12px;
+    padding: 12px 0;
+  }
+
+  .hp-guidance-summary {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .hp-guidance-state { grid-column: 2; grid-row: 1; }
+}

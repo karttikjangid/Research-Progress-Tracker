@@ -32,7 +32,7 @@ import clock  # noqa: E402
 import infra  # noqa: E402
 import llm  # noqa: E402
 import transcribe  # noqa: E402
-from db import (ARMS, DATA_DIR, DB_PATH, MAX_REVIEWS,  # noqa: E402
+from db import (ARMS, CONTINUATION_STATES, DATA_DIR, DB_PATH, MAX_REVIEWS,  # noqa: E402
                 RECALL_PREFIX, SESSION_KINDS, SESSION_MAX_HOURS, Answer, DayLog,
                 AppSetting, DriftReport, GamingError, GatedLimitExceeded,
                 Glossary, HabitLog, LLMCall, Recording, Review, RoadmapTicket,
@@ -188,6 +188,45 @@ class TaskCreate(BaseModel):
         return v
 
 
+class ContinuationIn(BaseModel):
+    """The editable handoff for a task that has not been completed yet."""
+    state: str = "active"
+    next_step: str = ""
+    blocker: str = ""
+    tried: str = ""
+
+    @field_validator("state")
+    @classmethod
+    def _state(cls, v):
+        if v not in CONTINUATION_STATES:
+            raise ValueError("state must be active, paused, or stuck")
+        return v
+
+    @field_validator("next_step", "blocker", "tried")
+    @classmethod
+    def _note(cls, v):
+        v = v.strip()
+        if len(v) > 2_000:
+            raise ValueError("continuation notes must be at most 2000 characters")
+        return v
+
+
+class CarryForwardIn(BaseModel):
+    # None means retain the source task's saved next step; an explicit empty
+    # string deliberately clears it on the new tomorrow task.
+    next_step: str | None = None
+
+    @field_validator("next_step")
+    @classmethod
+    def _carry_next_step(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) > 2_000:
+            raise ValueError("next step must be at most 2000 characters")
+        return v
+
+
 @app.get("/api/tasks")
 def list_tasks(date: str | None = None, s=Depends(db)):
     date = date or today()
@@ -227,6 +266,63 @@ def complete_simple(task_id: int, s=Depends(db)):
     t.status = "done"  # db layer 409s any illegal transition (e.g. gated tasks)
     s.commit()
     return t.as_dict()
+
+
+@app.put("/api/tasks/{task_id}/continuation")
+def update_continuation(task_id: int, body: ContinuationIn, s=Depends(db)):
+    """Save a task handoff without touching submitted evidence or answers."""
+    t = s.get(Task, task_id)
+    if not t:
+        raise HTTPException(404, "no such task")
+    if t.status in ("done", "passed", "failed_final"):
+        raise HTTPException(409, "cannot update continuation for a closed task")
+    if body.state == "stuck" and not body.blocker:
+        raise HTTPException(422, "a stuck task needs a blocker")
+    t.continuation_state = body.state
+    t.next_step, t.blocker, t.tried = body.next_step, body.blocker, body.tried
+    s.commit()
+    return t.as_dict()
+
+
+@app.post("/api/tasks/{task_id}/carry-forward", status_code=201)
+def carry_forward(task_id: int, body: CarryForwardIn | None = None, s=Depends(db)):
+    """Copy one unfinished task into tomorrow without changing today's record.
+
+    The unique source link means retries are harmless: a second click returns
+    the already-created successor rather than making a duplicate task.
+    """
+    source = s.get(Task, task_id)
+    if not source:
+        raise HTTPException(404, "no such task")
+    if source.date != today():
+        raise HTTPException(409, "only today's unfinished tasks can be carried forward")
+    if source.status not in ("open", "failed_once"):
+        raise HTTPException(409, "only unfinished tasks can be carried forward")
+    existing = (s.query(Task)
+                .filter(Task.carried_from_task_id == source.id)
+                .one_or_none())
+    if existing:
+        return {"task": existing.as_dict(), "already_carried_forward": True}
+    tomorrow = (dt.date.fromisoformat(today()) + dt.timedelta(days=1)).isoformat()
+    next_step = body.next_step if body and body.next_step is not None else source.next_step
+    successor = Task(date=tomorrow, title=source.title, type=source.type,
+                     continuation_state="active", next_step=next_step,
+                     blocker=source.blocker, tried=source.tried,
+                     carried_from_task_id=source.id)
+    s.add(successor)
+    try:
+        s.commit()
+    except IntegrityError:
+        # A second request may have won between the check above and this INSERT.
+        # Read its result so carry-forward remains idempotent under a double-click.
+        s.rollback()
+        existing = (s.query(Task)
+                    .filter(Task.carried_from_task_id == source.id)
+                    .one_or_none())
+        if existing:
+            return {"task": existing.as_dict(), "already_carried_forward": True}
+        raise
+    return {"task": successor.as_dict(), "already_carried_forward": False}
 
 
 # ---------- gated flow ----------
@@ -397,6 +493,22 @@ def _reviews_due_count(s, date: str) -> int:
             .filter(Review.status == "due", Review.due_date <= date).count())
 
 
+def _review_summaries(s, rows: list[Review], *, include_completion: bool = False) -> list[dict]:
+    """Safe review metadata for queue and history views (never learning content)."""
+    ids = {r.source_task_id for r in rows}
+    titles = ({t.id: t.title for t in s.query(Task).filter(Task.id.in_(ids))}
+              if ids else {})
+    out = []
+    for r in rows:
+        item = {"id": r.id, "source_task_id": r.source_task_id,
+                "title": titles.get(r.source_task_id, "(task removed)"),
+                "due_date": r.due_date}
+        if include_completion:
+            item.update({"grade": r.grade, "graded_at": r.graded_at})
+        out.append(item)
+    return out
+
+
 class GradeIn(BaseModel):
     grade: str
 
@@ -415,12 +527,39 @@ def reviews_due(date: str | None = None, s=Depends(db)):
     date = date or today()
     rows = (s.query(Review).filter(Review.status == "due", Review.due_date <= date)
             .order_by(Review.due_date, Review.id).all())
-    ids = {r.source_task_id for r in rows}
-    titles = ({t.id: t.title for t in s.query(Task).filter(Task.id.in_(ids))}
-              if ids else {})
-    return [{"id": r.id, "source_task_id": r.source_task_id,
-             "title": titles.get(r.source_task_id, "(task removed)"),
-             "due_date": r.due_date, "overdue": r.due_date < date} for r in rows]
+    items = _review_summaries(s, rows)
+    for item in items:
+        item["overdue"] = item["due_date"] < date
+    return items
+
+
+@app.get("/api/reviews/overview")
+def reviews_overview(date: str | None = None, s=Depends(db)):
+    """A compact, truthful view of review work without changing FSRS state.
+
+    `due` includes overdue cards; `upcoming` is limited to cards already
+    scheduled by FSRS; and `completed` reports every persisted grade. Thus an
+    empty due list plus a null next_due means there is no currently scheduled
+    follow-up, which is distinct from a loading or request failure in clients.
+    """
+    date = date or today()
+    due_rows = (s.query(Review)
+                .filter(Review.status == "due", Review.due_date <= date)
+                .order_by(Review.due_date, Review.id).all())
+    upcoming_rows = (s.query(Review)
+                     .filter(Review.status == "due", Review.due_date > date)
+                     .order_by(Review.due_date, Review.id).all())
+    completed_rows = (s.query(Review)
+                      .filter(Review.status == "done")
+                      .order_by(Review.graded_at.desc(), Review.id.desc()).all())
+    due = _review_summaries(s, due_rows)
+    for item in due:
+        item["overdue"] = item["due_date"] < date
+    upcoming = _review_summaries(s, upcoming_rows)
+    completed = _review_summaries(s, completed_rows, include_completion=True)
+    return {"date": date, "due": due, "upcoming": upcoming,
+            "completed": completed,
+            "next_due": upcoming[0]["due_date"] if upcoming else None}
 
 
 @app.post("/api/reviews/{rev_id}/reveal")
@@ -765,6 +904,7 @@ class SessionStart(BaseModel):
     kind: str
     planned_minutes: int
     notes: str | None = None
+    task_id: int | None = None
 
     @field_validator("kind")
     @classmethod
@@ -795,7 +935,10 @@ def current_session(s=Depends(db)):
     endpoint by design' — that call was about avoiding an unneeded surface,
     not a deliberate ban; a read-only reconciliation source is worth adding to
     fix a real false-lock bug per CLAUDE.md's authority to relax brittle
-    locking. See SESSION_LOG.md."""
+    locking. See SESSION_LOG.md. `task_id` is a real column now (see
+    022_session_task_link.sql), so this reconciliation is exact — the
+    frontend no longer has to guess which task a recovered session belongs
+    to from a possibly-missing local cache."""
     _sweep_open_sessions(s, close_all=False)
     sess = s.query(WorkSession).filter(WorkSession.ended_at == "").first()
     return sess.as_dict() if sess else None
@@ -808,7 +951,7 @@ def start_session(body: SessionStart, s=Depends(db)):
         raise HTTPException(409, "a session is already running — end it first")
     sess = WorkSession(date=today(), kind=body.kind, planned_minutes=body.planned_minutes,
                        started_at=_now().isoformat(timespec="seconds"),
-                       notes=(body.notes or ""))
+                       notes=(body.notes or ""), task_id=body.task_id)
     s.add(sess)
     s.commit()
     return sess.as_dict()

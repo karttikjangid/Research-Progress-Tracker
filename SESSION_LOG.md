@@ -1096,3 +1096,87 @@ task afterward. Files: `frontend/src/evidence.css` (2 lines).
   no way to tell transient load from a permanent regression from here.
 - Files: `backend/llm.py` (`TIMEOUT`, `LONG_TIMEOUT`, two `max_tokens`
   values, `_chat()` null-content guard, updated comments).
+
+## `actions.md` daily-UX batch — verification session (stopped early by user)
+
+- **Starting state found:** the entire six-item `actions.md` batch (session-end
+  sheet, draft preservation, review discoverability, focused review
+  interaction, day-closure resolution, habits progressive disclosure) already
+  existed as an uncommitted working-tree diff — `backend/db.py`, `backend/
+  main.py`, `frontend/src/{App,Today,Habits}.jsx`, `frontend/src/components/
+  {CloseFileModal,GatedFlow}.jsx` modified, plus new files `backend/
+  migrations/021_task_continuation.sql`, `backend/tests/
+  test_daily_ux_backend.py`, `frontend/src/components/{ReviewCenter,
+  SessionEndSheet}.jsx`, and three new CSS files. This was implemented
+  earlier in this same session (before a context compaction), not in this
+  pass — this pass was pure verification, per the user's ask.
+- **Backend tests:** full suite `../.venv/bin/python -m pytest` — **154
+  passed**, including all 5 new tests in `test_daily_ux_backend.py`
+  (continuation durability/validation, carry-forward idempotency/rejection,
+  review-overview correctness against real FSRS state).
+- **Real DB was never touched.** `data/gatekeeper.db` was still on schema
+  version 20 (migration 021 not yet applied) — backed up to `backups/
+  gatekeeper.db.pre-daily-ux-20260911172652.bak` before touching anything,
+  then left alone; all verification ran against isolated copies instead. It
+  turned out an *earlier* part of this session had already set up isolated
+  copies at `/private/tmp/sentinel-ux-audit` and `/private/tmp/sentinel-ux-
+  verify.*` — schema 21, migration applied — and a real dev server pair was
+  already running against one of them on ports 8000/5173 (not the real
+  data). That instance was reused for manual testing rather than rebuilt.
+- **Shared-file change:** `frontend/vite.config.js` — the dev proxy target
+  is now read from `VITE_API_PORT` (default `8000`, unchanged), so multiple
+  isolated frontend+backend pairs can run on different ports side by side
+  without editing this file per instance. Purely additive; the default
+  instance's behavior is identical to before.
+- **Manually verified live in the browser** (against the existing isolated
+  8000/5173 instance), each confirmed working end-to-end including a full
+  page refresh:
+  - Item 1 (session-end sheet): starting a session, clicking END SESSION,
+    seeing the three-choice sheet (Finish task / Continue later / I'm
+    stuck), picking "Continue later" with a next-step note — timer stopped,
+    task stayed OPEN (not force-completed), the exhibit card showed a
+    "NEXT ..." continuation note, and it survived a hard refresh (backend-
+    persisted, not local state).
+  - Items 3 & 4 (review discoverability + focused interaction): the
+    "LEARNING REVIEWS" entry on Today showed "1 review due" and a START
+    REVIEW button; opening it showed one review ("1 OF 1") with the recall
+    prompt before reveal, REVEAL MATERIAL showed the real saved
+    artifact/question/answer, grading RECALLED produced a real "SAVED" +
+    "Next review: 13 Sept." (an actual FSRS-computed date, not a
+    placeholder), and after FINISH REVIEWS the entry correctly flipped to
+    the truthful empty state "Nothing due · next 12 Sept."
+  - No console errors observed during any of this.
+- **Not yet manually verified:** item 2 (draft preservation across
+  navigate/refresh, draft isolation between tasks), item 5 (day-closure
+  resolve actions — carry-forward, end-running-session, do-reviews,
+  write-reflection — and that closing doesn't silently mark unfinished work
+  complete), item 6 (habits page progressive disclosure — collapse/expand,
+  keyboard access, narrow-screen layout). A first attempt to click into the
+  HABITS tab hit a stale render right as a background process's file edit
+  triggered a shared Vite hot-reload (all dev-server instances watch the
+  same source tree, since only *data* was isolated per instance, not code)
+  — not re-tried before the session was stopped, so it is genuinely
+  unconfirmed either way, not a known-good or known-bad result.
+- **Parallel verification agents:** three Opus subagents were launched to
+  independently verify the remaining items in fully isolated environments
+  (own backend port, own copied+migrated database at `/private/tmp/rpt-
+  verify-{sessionend,reviews,dayclose}`, non-overlapping file ownership so
+  they couldn't conflict with each other) — session-end/drafts (8001/5174),
+  reviews (8002/5175), day-closure/habits (8003/5176). **The user asked to
+  stop before any of them completed or made a single edit** — confirmed via
+  `git status` immediately after stopping (identical file list to before,
+  only the `vite.config.js` change from this pass). All three were killed
+  via `TaskStop`, and their backend/frontend processes (ports 8001-8003,
+  5174-5176) were killed directly since agents don't auto-clean up on a
+  hard stop. Their isolated data copies were left in place under
+  `/private/tmp/rpt-verify-*` in case verification resumes later; they are
+  disposable copies, not linked to anything real.
+- **Net result of this pass:** no functional code changed. The only diff
+  from this session beyond what already existed is the `vite.config.js`
+  proxy-port parameterization (verified as behavior-neutral for the default
+  case) and this log entry. Items 1, 3, and 4 have real, browser-confirmed
+  evidence behind them; items 2, 5, and 6 are implemented (backend tests
+  covering their data model pass) but not yet independently exercised in a
+  browser — that's the concrete next step if verification resumes.
+- Files touched this pass: `frontend/vite.config.js` (proxy-port env var),
+  `SESSION_LOG.md` (this entry). No application logic changed.

@@ -4,6 +4,7 @@ sqlalchemy
 python-dotenv
 pyyaml
 requests
+google-genai
 python-multipart
 # faster-whisper  # DISABLED — switched to NVIDIA Riva hosted API — revert by uncommenting
 nvidia-riva-client
