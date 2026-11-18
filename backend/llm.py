@@ -196,7 +196,7 @@ def _chat_nvidia(key: str, system: str, user: str, max_tokens: int, timeout: int
         raise LLMError("NVIDIA_API_KEY is not set in .env")
     # Nemotron 3 Super is available on NVIDIA's free endpoint and was verified
     # with this account's entitlement and strict evaluator verdict format.
-    model = os.getenv("EVAL_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+    model = os.getenv("EVAL_MODEL", "nvidia/nemotron-3-ultra-550b-a55b")
     last = None
     for attempt in range(RETRIES + 1):
         if attempt:

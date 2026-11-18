@@ -1180,3 +1180,67 @@ task afterward. Files: `frontend/src/evidence.css` (2 lines).
   browser — that's the concrete next step if verification resumes.
 - Files touched this pass: `frontend/vite.config.js` (proxy-port env var),
   `SESSION_LOG.md` (this entry). No application logic changed.
+
+---
+
+## 2026-11-17 — Health check + full progress reset ("restarting my learning journey")
+
+**Backup first:** `backups/pre-reset/gatekeeper-20261117-155147.db` (sqlite `.backup`,
+integrity_check ok). To undo the reset, copy it over `data/gatekeeper.db` while the server is stopped.
+
+**Reset (data only, no code/schema changes):** emptied answers, drift_reports, llm_calls,
+syntheses, vocab_flags, glossary, reviews, recordings, tasks, day_log, habit_log, sessions,
+tastelog. All 14 roadmap tickets set to open with no deadline. Kept schema_version (20
+migrations) and app_setting (already empty). VACUUM + integrity_check ok. What was cleared
+was small: 1 old 24s struggle-timer session, 3 habit ticks, 5 LLM-call logs from Aug.
+Everything else was already empty from the 2026-08-10 reset.
+
+**Health check results:**
+- Backend tests: 156 passed (1 deprecation warning: starlette TestClient/httpx).
+- Live server: /healthz plus all 18 GET endpoints return 200. Post-reset state confirmed:
+  streak 0/0, closed_today false, no tasks/history/reviews, no open session.
+- Frontend: vite build ok, oxlint clean. ffmpeg present.
+- Not exercised: a live Riva transcription or a live LLM verdict (needs a real recording).
+
+**Content is stale (left alone, the owner should decide):** `week.yaml` week_of is 2026-07-06,
+and the roadmap window is "2026-07-15 to 2026-10-15", which ended before today.
+
+## 2026-11-17 — Render: tasks added last night missing today (ROOT CAUSE: Supabase paused)
+
+**Symptom (owner):** tasks added on Render last night weren't there today.
+**Cause (confirmed by owner):** the Supabase project had been auto-paused. Litestream
+replicates the SQLite DB to Supabase S3, and Render free has no persistent disk. Writes
+landed on the ephemeral disk but couldn't replicate. When the instance slept, the disk was
+wiped. On the next boot `entrypoint.sh` ran `litestream restore ... || true`, which
+swallowed the network error and booted an EMPTY DB without any error.
+**Second hazard:** once Supabase resumes, Litestream uploads that empty DB as the newest
+generation, so a later restore would pick it over the real history.
+
+**Fix (entrypoint.sh):** restore failure no longer falls through. It retries 5x
+(RESTORE_ATTEMPTS), then exits 1 with a "Supabase paused?" message. `-if-replica-exists`
+still exits 0 on a reachable-but-empty bucket, so a true first boot still works.
+Escape hatch: ALLOW_EMPTY_BOOT=1. Decision: being down is recoverable, a forked history
+isn't.
+**Verified:** `sh -n` only. A stubbed-litestream simulation was blocked by permissions.
+Not deployed: Render builds from GitHub and this session never commits or pushes.
+**Also separate:** Today only lists tasks dated today (IST). Carry-forward works only on
+the same day.
+
+## 2026-11-18 — Evaluator health: NVIDIA fallback models retired
+
+**Found (live calls, not code reading):** Render showed `nvidia HTTP 410 ... moonshotai/kimi-k3
+end of life 2026-10-15`. Render had no GEMINI_API_KEY (owner has now added it) and its
+dashboard sets EVAL_MODEL=kimi-k3. The code default `nvidia/nemotron-3-super-120b-a12b` is ALSO
+EOL (410, 2026-10-03), so the NVIDIA fallback was dead. Local Gemini (gemini-3.8-flash) works.
+
+**Model choice:** listed /v1/models on the account, then ran the real prompts/answer_eval.txt
+through `_chat_nvidia`:
+- nemotron-3-ultra-550b-a55b: 3.7s, correct format; PASSes a good answer, FAILs a vague one. CHOSEN.
+- kimi-k3.1-pro: 10.9s, correct format (backup choice).
+- nemotron-3.5-lightning, mistral-large-4: empty response. glm-5.3-flash: timed out.
+
+**Changed:** default model in backend/llm.py:199, render.yaml, DEPLOY.md -> nemotron-3-ultra.
+.env.example not updated (blocked by a permission deny rule, owner should edit). The
+`enable_thinking` special case at llm.py:214 is still keyed to the retired super model. It's
+harmless, and Ultra returned clean verdicts without it. Tests: 156 passed.
+**Owner action:** on Render set EVAL_MODEL=nvidia/nemotron-3-ultra-550b-a55b (or delete it).

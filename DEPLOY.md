@@ -48,7 +48,7 @@ blank on purpose):
 | `NVIDIA_API_KEY` | your NIM key (`nvapi-…`) |
 
 These are already set by the Blueprint and should not be changed:
-`GATEKEEPER_STATE=/data`, `HF_HOME=/data/hf`, `EVAL_MODEL=nvidia/nemotron-3-super-120b-a12b`.
+`GATEKEEPER_STATE=/data`, `HF_HOME=/data/hf`, `EVAL_MODEL=nvidia/nemotron-3-ultra-550b-a55b`.
 
 Save — Render redeploys automatically.
 
